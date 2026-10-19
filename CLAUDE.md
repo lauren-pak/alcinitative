@@ -4,7 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-"Athlete App": a Flutter app targeting **iOS and Android only**. It is a fresh `flutter create` scaffold (Sept 2026), so `lib/main.dart` is still the default counter template and there's no app-specific architecture yet. Update this file as structure is added.
+"Athlete App": a Flutter app targeting **iOS and Android only**. It is a safe space for athletes to share experiences and advice under four topics (injury, training, sports nutrition, competition). It is an early prototype with no backend. Nothing is persisted yet, and screens use in-memory data.
+
+Safeguarding is a core requirement, not polish. Members under 18 (`adultAge` in `lib/models/sign_up_data.dart`) get extra protections, and sign-up blocks anyone under `minimumAge` (13). The planned under-18 rules (hidden from search, comments only from other under-18s, videos reviewed before going live) are only described to users in `MinorProtectionsNotice` so far. Nothing enforces them yet, so keep that copy in sync when you implement them.
+
+## Architecture
+
+- `lib/main.dart` → `IntroScreen` ("Welcome to Athlete App", explains the app) → **Get started** pushes `SignUpFlow`.
+- `lib/screens/sign_up/`: `SignUpFlow` owns a single mutable `SignUpData` and the step index. The step widgets (`RoleStep`, `MethodStep`, `AboutStep`, `ProfileStep`) write directly into that shared object, so values survive moving back and forth between steps. On completion it clears the stack and shows `SignUpCompleteScreen`, a placeholder for the feed.
+- `MethodStep` offers Google, phone (+65, Singapore 8-digit numbers) and email sign-up. **Google and phone verification are simulated** (no OAuth, no SMS; any 6-digit code is accepted) until a backend is chosen. Email/password is only validated locally.
+- `lib/models/sign_up_data.dart` holds the domain enums (`UserRole`, `SignUpMethod`, `AthleteCategory`, `Topic`, `CompetitionLevel`, each with a display `label`), the `sports` list and the age helpers. `AthleteCategory` (national / Paralympic / Special Olympics) is optional. The `sports` list includes the Special Olympics Singapore sports verified on inclusivesport.gov.sg. Don't add SOSG sports without a source. There's no state-management package; plain `StatefulWidget`s only.
 
 The Flutter project lives at the **repo root**, not in a subfolder. An earlier Flutter + Firebase prototype was deliberately removed and survives only in git history (commit `4e1a513`). Don't restore it or assume the new app uses Firebase unless asked.
 

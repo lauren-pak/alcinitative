@@ -1,0 +1,105 @@
+enum UserRole {
+  athlete('Athlete', 'Share your experiences and give advice to other athletes.'),
+  public('General public', 'Follow athletes, learn from them and ask questions.');
+
+  const UserRole(this.label, this.description);
+  final String label;
+  final String description;
+}
+
+enum SignUpMethod {
+  google('Google'),
+  phone('Phone number'),
+  email('Email');
+
+  const SignUpMethod(this.label);
+  final String label;
+}
+
+/// Optional programme an athlete belongs to.
+enum AthleteCategory {
+  national('National athlete'),
+  paralympic('Paralympic athlete'),
+  specialOlympics('Special Olympics athlete');
+
+  const AthleteCategory(this.label);
+  final String label;
+}
+
+enum Topic {
+  injury('Injury'),
+  training('Training'),
+  nutrition('Sports nutrition'),
+  competition('Competition');
+
+  const Topic(this.label);
+  final String label;
+}
+
+enum CompetitionLevel {
+  school('School'),
+  club('Club'),
+  regional('Regional'),
+  national('National'),
+  elite('Elite / Pro');
+
+  const CompetitionLevel(this.label);
+  final String label;
+}
+
+// Includes the Special Olympics Singapore sports listed on the Inclusive Sport
+// directory (inclusivesport.gov.sg): athletics, badminton, basketball, bocce,
+// bowling, football, swimming.
+const sports = [
+  'Athletics',
+  'Badminton',
+  'Basketball',
+  'Bocce',
+  'Bowling',
+  'Cricket',
+  'Cycling',
+  'Football',
+  'Gymnastics',
+  'Hockey',
+  'Martial arts',
+  'Netball',
+  'Rowing',
+  'Rugby',
+  'Swimming',
+  'Tennis',
+  'Volleyball',
+  'Other',
+];
+
+/// Youngest age allowed to sign up.
+const minimumAge = 13;
+
+/// Members younger than this get the under-18 protections.
+const adultAge = 18;
+
+/// Age in whole years on [today].
+int ageOn(DateTime dateOfBirth, DateTime today) {
+  var age = today.year - dateOfBirth.year;
+  final hadBirthdayThisYear = today.month > dateOfBirth.month ||
+      (today.month == dateOfBirth.month && today.day >= dateOfBirth.day);
+  if (!hadBirthdayThisYear) age--;
+  return age;
+}
+
+/// Answers collected across the sign-up steps. Not persisted yet.
+class SignUpData {
+  UserRole? role;
+  SignUpMethod? method;
+  String email = '';
+  String password = '';
+  String phone = '';
+  String name = '';
+  DateTime? dateOfBirth;
+  String? sport;
+  CompetitionLevel? level;
+  AthleteCategory? category;
+  final Set<Topic> topics = {};
+
+  bool isMinorOn(DateTime today) =>
+      dateOfBirth != null && ageOn(dateOfBirth!, today) < adultAge;
+}
