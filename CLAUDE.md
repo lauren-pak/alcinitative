@@ -21,6 +21,11 @@ flutter build apk                            # Android build
 flutter build ios                            # iOS build (macOS + Xcode required)
 ```
 
+## iOS build gotchas
+
+- The repo must stay **outside iCloud-synced folders** (`~/Desktop`, `~/Documents` are synced on this Mac). iCloud adds extended attributes that break framework code-signing with "resource fork, Finder information, or similar detritus not allowed". The repo was moved to `~/Coding/alcinitative` for this reason. If it reappears, run `flutter clean`, then strip attributes outside `.git`.
+- `IPHONEOS_DEPLOYMENT_TARGET` is **15.0** in `ios/Runner.xcodeproj/project.pbxproj`. Xcode 27 rejects the template's default of 13.0. Keep it ≥15 when adding a Podfile or plugins.
+
 ## Identifiers
 
 - Dart package: `athlete_app` (imports are `package:athlete_app/...`). Dart SDK `^3.12.2`.
