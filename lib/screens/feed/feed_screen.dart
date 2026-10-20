@@ -1,0 +1,246 @@
+import 'package:flutter/material.dart';
+
+import '../../models/account.dart';
+import '../../models/post.dart';
+import '../../models/sign_up_data.dart';
+import '../../services/services.dart';
+import '../../widgets/feed_widgets.dart';
+import 'compose_post_screen.dart';
+import 'post_detail_screen.dart';
+
+/// The feed: "For you" (questions needing answers, then the latest posts in
+/// the member's topics), then one tab per topic.
+class FeedScreen extends StatefulWidget {
+  const FeedScreen({super.key, required this.account});
+
+  final Account account;
+
+  @override
+  State<FeedScreen> createState() => _FeedScreenState();
+}
+
+class _FeedScreenState extends State<FeedScreen> {
+  /// Bumped after posting, to reload every tab.
+  int _generation = 0;
+
+  Set<Topic> get _myTopics => widget.account.profile.topics.isEmpty
+      ? Topic.values.toSet()
+      : widget.account.profile.topics;
+
+  Future<void> _compose() async {
+    final created = await Navigator.of(context).push<Post>(
+      MaterialPageRoute(
+        builder: (_) => ComposePostScreen(account: widget.account),
+      ),
+    );
+    if (created != null && mounted) setState(() => _generation++);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isPublic = widget.account.profile.role == UserRole.public;
+
+    return DefaultTabController(
+      length: 1 + Topic.values.length,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Feed'),
+          actions: [
+            IconButton(
+              tooltip: 'Get help',
+              icon: const Icon(Icons.support_outlined),
+              onPressed: () => showSupportSheet(context),
+            ),
+          ],
+          bottom: TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            tabs: [
+              const Tab(icon: Icon(Icons.auto_awesome_outlined), text: 'For you'),
+              for (final topic in Topic.values)
+                Tab(icon: Icon(topicIcon(topic)), text: topic.label),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            _FeedList(
+              key: ValueKey('for-you-$_generation'),
+              account: widget.account,
+              topics: _myTopics,
+            ),
+            for (final topic in Topic.values)
+              _FeedList(
+                key: ValueKey('${topic.name}-$_generation'),
+                account: widget.account,
+                topics: {topic},
+                needsAnswerLimit: 3,
+              ),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _compose,
+          icon: Icon(isPublic ? Icons.help_outline : Icons.edit_outlined),
+          label: Text(isPublic ? 'Ask a question' : 'New post'),
+        ),
+      ),
+    );
+  }
+}
+
+class _FeedList extends StatefulWidget {
+  const _FeedList({
+    super.key,
+    required this.account,
+    required this.topics,
+    this.needsAnswerLimit = 5,
+  });
+
+  final Account account;
+  final Set<Topic> topics;
+  final int needsAnswerLimit;
+
+  @override
+  State<_FeedList> createState() => _FeedListState();
+}
+
+class _FeedListState extends State<_FeedList>
+    with AutomaticKeepAliveClientMixin {
+  late Future<(List<Post>, List<Post>)> _load = _fetch();
+
+  @override
+  bool get wantKeepAlive => true;
+
+  Future<(List<Post>, List<Post>)> _fetch() async {
+    final feed = Services.feed;
+    final results = await Future.wait([
+      feed.needsAnswer(widget.topics, limit: widget.needsAnswerLimit),
+      feed.latest(widget.topics),
+    ]);
+    return (results[0], results[1]);
+  }
+
+  Future<void> _refresh() async {
+    final next = _fetch();
+    setState(() {
+      _load = next;
+    });
+    await next.catchError((_) => (<Post>[], <Post>[]));
+  }
+
+  Future<void> _open(Post post) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PostDetailScreen(post: post, viewer: widget.account),
+      ),
+    );
+    if (mounted) _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final textTheme = Theme.of(context).textTheme;
+
+    return FutureBuilder<(List<Post>, List<Post>)>(
+      future: _load,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          debugPrint('Feed failed to load: ${snapshot.error}');
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                Text(
+                  "Couldn't load posts. Pull down to try again.",
+                  style: textTheme.bodyLarge,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          );
+        }
+        final (needs, latest) = snapshot.data!;
+        final needIds = {for (final p in needs) p.id};
+        final rest = [for (final p in latest) if (!needIds.contains(p.id)) p];
+
+        return RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView(
+            padding: const EdgeInsets.only(top: 8, bottom: 96),
+            children: [
+              if (needs.isNotEmpty) ...[
+                const _SectionHeader(
+                  title: 'Needs an answer',
+                  subtitle: 'Questions waiting for advice from someone '
+                      "who's been there.",
+                  icon: Icons.contact_support_outlined,
+                ),
+                for (final post in needs)
+                  PostCard(post: post, onTap: () => _open(post)),
+              ],
+              const _SectionHeader(
+                title: 'Latest',
+                icon: Icons.schedule,
+              ),
+              if (rest.isEmpty && needs.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'No posts yet. Be the first to share.',
+                    style: textTheme.bodyLarge,
+                    textAlign: TextAlign.center,
+                  ),
+                )
+              else if (rest.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text('Nothing else yet.', style: textTheme.bodyMedium),
+                ),
+              for (final post in rest)
+                PostCard(post: post, onTap: () => _open(post)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.icon, this.subtitle});
+
+  final String title;
+  final IconData icon;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: scheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: textTheme.titleMedium),
+                if (subtitle != null)
+                  Text(subtitle!, style: textTheme.bodySmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

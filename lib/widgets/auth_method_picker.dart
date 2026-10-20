@@ -190,6 +190,10 @@ class _AuthMethodPickerState extends State<AuthMethodPicker> {
               decoration: const InputDecoration(
                 labelText: 'Phone number',
                 prefixText: '+65 ',
+                // Firebase asks apps to warn that an SMS will be sent.
+                helperText: "We'll text you a 6-digit code. Standard "
+                    'message rates may apply.',
+                helperMaxLines: 2,
                 border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.phone,

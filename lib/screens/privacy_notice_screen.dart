@@ -43,6 +43,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 'The topics you pick for your feed.',
                 'Your email address, phone number or Google account, '
                     'depending on how you sign in.',
+                'What you post: your posts, replies, journeys and '
+                    'reactions like "Been there" and "Helpful".',
                 "An athlete ID we make for you. We don't collect your "
                     'location.',
               ],
@@ -55,6 +57,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 "Your date of birth tells us if you're under 18, so we can "
                     'turn on extra protections for you.',
                 'Your topics decide what shows up in your feed.',
+                'Your posts and replies are shared with other members, '
+                    'because sharing experiences is what the app is for.',
                 "We never sell your information or use it for adverts.",
               ],
             ),
@@ -67,6 +71,12 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 "If you're under 18, only other under-18s can see your "
                     'card, even if an adult has your ID.',
                 'Nobody can search for you or browse a list of members.',
+                'Your posts and replies can be seen by members who are '
+                    'logged in, with your name and sport. Nobody outside '
+                    'the app can see them.',
+                'If you post anonymously, other members don\'t see your '
+                    'name. Our moderators can still see who posted, to keep '
+                    'everyone safe.',
                 'Your date of birth, email and phone number are never '
                     'shown to other members.',
               ],
@@ -85,7 +95,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
               points: [
                 'For as long as you have an account.',
                 'When you delete your account, we delete your profile, '
-                    'your athlete ID and your sign-in details.',
+                    'your athlete ID, your posts, replies and reactions, '
+                    'and your sign-in details.',
               ],
             ),
             const _Section(

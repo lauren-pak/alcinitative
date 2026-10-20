@@ -71,7 +71,7 @@ class AccountHomeScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Athlete App'),
+        title: const Text('My ID'),
         actions: [
           TextButton(
             onPressed: () => _logOut(context),
@@ -162,12 +162,6 @@ class AccountHomeScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 const MinorProtectionsNotice(),
               ],
-              const SizedBox(height: 24),
-              Text(
-                'The feed comes next.',
-                style: textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
             ],
           ),
         ),

@@ -66,6 +66,7 @@ void main() {
     profiles = InMemoryProfileRepository(auth);
     Services.auth = auth;
     Services.profiles = profiles;
+    Services.feed = InMemoryFeedRepository();
   });
 
   group('age rules', () {
@@ -294,6 +295,11 @@ void main() {
 
     await tester.enterText(fields.at(1), 'password123');
     await _tapButton(tester, 'Log in');
+    // Returning members land on the feed; their ID is one tab away.
+    expect(find.text('Needs an answer'), findsNothing);
+    expect(find.text('No posts yet. Be the first to share.'), findsOneWidget);
+    await tester.tap(find.text('My ID'));
+    await tester.pumpAndSettle();
     expect(find.text('Welcome back, Sam!'), findsOneWidget);
     expect(find.text(account.athleteId), findsOneWidget);
   });

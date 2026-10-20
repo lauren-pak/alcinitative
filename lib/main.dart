@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'firebase_options.dart';
 import 'screens/auth_gate.dart';
 import 'services/firebase_auth_service.dart';
+import 'services/firestore_feed_repository.dart';
 import 'services/firestore_profile_repository.dart';
 import 'services/services.dart';
 
@@ -14,6 +15,7 @@ Future<void> main() async {
   await auth.init();
   Services.auth = auth;
   Services.profiles = FirestoreProfileRepository();
+  Services.feed = FirestoreFeedRepository();
   runApp(const AthleteApp());
 }
 

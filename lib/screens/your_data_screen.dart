@@ -85,8 +85,9 @@ class _YourDataScreenState extends State<YourDataScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Delete your account?'),
         content: const Text(
-          'This permanently deletes your profile, your athlete ID and your '
-          "sign-in details. You can't undo it.",
+          'This permanently deletes your profile, your athlete ID, your '
+          "posts, replies and reactions, and your sign-in details. You can't "
+          'undo it.',
         ),
         actions: [
           TextButton(
@@ -118,6 +119,7 @@ class _YourDataScreenState extends State<YourDataScreen> {
 
     setState(() => _deleting = true);
     try {
+      await Services.feed.deleteContributions(_account);
       await Services.profiles.delete(_account);
       await Services.auth.deleteCurrentUser();
     } on AuthException catch (e) {

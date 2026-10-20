@@ -72,6 +72,15 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['name', 'sport', 'customSport', 'level', 'category',
                        'topics']);
+
+      // Private list of everything this member created, so deleting the
+      // account can delete it all (PDPA: withdrawing consent).
+      match /contributions/{contributionId} {
+        allow get, list, delete: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['path'])
+          && request.resource.data.path is string;
+      }
     }
 
     // Public ID card, looked up only by exact ID: no listing or searching,
@@ -101,6 +110,182 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['name', 'sport', 'customSport', 'level', 'category']);
 
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+    // ---------------------------------------------------------------------
+    // Feed. See docs/feed-design.md. Mirrored in the app by FeedRules.
+    // ---------------------------------------------------------------------
+
+    function profile() {
+      return get(userPath(request.auth.uid)).data;
+    }
+
+    function postPath(postId) {
+      return /databases/$(database)/documents/posts/$(postId);
+    }
+
+    function authorLinkPath(postId) {
+      return /databases/$(database)/documents/postAuthors/$(postId);
+    }
+
+    // The private author link, which also covers anonymous posts.
+    function isPostAuthor(postId) {
+      return get(authorLinkPath(postId)).data.uid == request.auth.uid;
+    }
+
+    function onlyChanged(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(keys);
+    }
+
+    // Author fields must match the writer's real ID card.
+    function authorMatches(d) {
+      let p = profile();
+      return d.authorUid == request.auth.uid
+        && d.authorName == p.name
+        && d.authorSport == (p.role == 'athlete'
+             ? (p.sport == 'Other' ? p.customSport : p.sport) : null)
+        && d.authorLevel == p.level
+        && d.authorCategory == p.category;
+    }
+
+    function validNewPost(d) {
+      let p = profile();
+      let minor = isMinor(request.auth.uid);
+      return d.keys().hasOnly(['type', 'topic', 'text', 'createdAt',
+          'authorRole', 'minorAuthor', 'replyPolicy', 'anonymous', 'answered',
+          'replyCount', 'beenThereCount', 'authorUid', 'authorName',
+          'authorSport', 'authorLevel', 'authorCategory', 'journeyId',
+          'journeyTitle'])
+        && d.type in ['experience', 'question']
+        // General public members can only ask questions.
+        && (p.role == 'athlete' || d.type == 'question')
+        && d.topic in ['injury', 'training', 'nutrition', 'competition']
+        // Under-18 nutrition posts need moderator review (not built yet).
+        && !(minor && d.topic == 'nutrition')
+        && d.text is string && d.text.size() > 0 && d.text.size() <= 2000
+        && d.createdAt == request.time
+        && d.authorRole == p.role
+        && d.minorAuthor == minor
+        && d.replyPolicy in ['athletes', 'everyone', 'none']
+        && d.anonymous is bool
+        && d.answered == false && d.replyCount == 0 && d.beenThereCount == 0
+        // Anonymous posts carry no author or journey fields at all.
+        && (d.anonymous
+              ? !d.keys().hasAny(['authorUid', 'authorName', 'authorSport',
+                  'authorLevel', 'authorCategory', 'journeyId', 'journeyTitle'])
+              : authorMatches(d))
+        && (!d.keys().hasAny(['journeyId'])
+              || get(/databases/$(database)/documents/journeys/$(d.journeyId))
+                   .data.ownerUid == request.auth.uid);
+    }
+
+    function validReply(postId, d) {
+      let p = profile();
+      let post = get(postPath(postId)).data;
+      let minor = isMinor(request.auth.uid);
+      return d.keys().hasOnly(['authorUid', 'authorName', 'authorSport',
+          'authorLevel', 'authorCategory', 'authorRole', 'minorAuthor', 'text',
+          'createdAt', 'helpfulCount', 'helpedAsker'])
+        && authorMatches(d)
+        && d.authorRole == p.role
+        && d.minorAuthor == minor
+        && d.text is string && d.text.size() > 0 && d.text.size() <= 1000
+        && d.createdAt == request.time
+        && d.helpfulCount == 0 && d.helpedAsker == false
+        // The poster's choice of who may reply.
+        && post.replyPolicy != 'none'
+        && (post.replyPolicy == 'everyone' || p.role == 'athlete')
+        // Only under-18s reply to under-18 posts, until adult replies can
+        // be reviewed by a moderator.
+        && (!post.minorAuthor || minor);
+    }
+
+    // A counter moves by exactly one, together with the matching reaction.
+    function counterMoved(field, reaction) {
+      let before = resource.data[field];
+      let after = request.resource.data[field];
+      return onlyChanged([field]) && (
+        (after == before + 1 && !exists(reaction) && existsAfter(reaction))
+        || (after == before - 1 && exists(reaction) && !existsAfter(reaction)));
+    }
+
+    match /posts/{postId} {
+      // Members only, never public. Listing is allowed for the feed.
+      allow get, list: if signedIn();
+
+      allow create: if signedIn() && validNewPost(request.resource.data)
+        && getAfter(authorLinkPath(postId)).data.uid == request.auth.uid;
+
+      allow update: if signedIn() && (
+        counterMoved('beenThereCount',
+          /databases/$(database)/documents/posts/$(postId)/beenThere/$(request.auth.uid))
+        // A new reply: count +1 alongside a reply that didn't exist before.
+        || (onlyChanged(['replyCount', 'lastReplyId'])
+            && request.resource.data.replyCount == resource.data.replyCount + 1
+            && !exists(/databases/$(database)/documents/posts/$(postId)/replies/$(request.resource.data.lastReplyId))
+            && existsAfter(/databases/$(database)/documents/posts/$(postId)/replies/$(request.resource.data.lastReplyId)))
+        // The asker marks their question answered.
+        || (onlyChanged(['answered'])
+            && resource.data.type == 'question'
+            && resource.data.answered == false
+            && request.resource.data.answered == true
+            && isPostAuthor(postId)));
+
+      allow delete: if signedIn() && isPostAuthor(postId);
+
+      match /replies/{replyId} {
+        allow get, list: if signedIn();
+        allow create: if signedIn() && validReply(postId, request.resource.data)
+          && getAfter(postPath(postId)).data.lastReplyId == replyId;
+        allow update: if signedIn() && (
+          counterMoved('helpfulCount',
+            /databases/$(database)/documents/posts/$(postId)/replies/$(replyId)/helpful/$(request.auth.uid))
+          // The asker picks the reply that helped, answering the question.
+          || (onlyChanged(['helpedAsker'])
+              && resource.data.helpedAsker == false
+              && request.resource.data.helpedAsker == true
+              && isPostAuthor(postId)
+              && get(postPath(postId)).data.answered == false
+              && getAfter(postPath(postId)).data.answered == true));
+        allow delete: if signedIn() && resource.data.authorUid == request.auth.uid;
+
+        match /helpful/{uid} {
+          allow get, delete: if signedIn() && request.auth.uid == uid;
+          allow create: if signedIn() && request.auth.uid == uid
+            && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+            && request.resource.data.uid == uid;
+        }
+      }
+
+      match /beenThere/{uid} {
+        allow get, delete: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+          && request.resource.data.uid == uid;
+      }
+    }
+
+    // Private link from a post to its author. Only the author can read it,
+    // so anonymous posts stay anonymous to everyone else.
+    match /postAuthors/{postId} {
+      allow get, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid
+        && !exists(postPath(postId)) && existsAfter(postPath(postId));
+    }
+
+    match /journeys/{journeyId} {
+      allow get, list: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['ownerUid', 'title', 'createdAt'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 60
+        && request.resource.data.createdAt == request.time;
       allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
     }
   }

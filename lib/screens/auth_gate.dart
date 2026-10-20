@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/account.dart';
 import '../services/auth_service.dart';
 import '../services/services.dart';
-import 'account_home_screen.dart';
+import 'home_shell.dart';
 import 'intro_screen.dart';
 import 'sign_up/sign_up_flow.dart';
 
@@ -42,7 +42,7 @@ class _AuthGateState extends State<AuthGate> {
 Widget _screenFor(AuthUser user, Account? account) => account == null
     // Signed in but never finished sign-up: pick up where they left off.
     ? SignUpFlow(resumeUser: user)
-    : AccountHomeScreen(account: account, isNewAccount: false);
+    : HomeShell(account: account, isNewAccount: false);
 
 /// After a successful log-in: opens the account, or finishes sign-up if the
 /// profile was never completed. Clears the back stack.

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/sign_up_data.dart';
 import '../../services/auth_service.dart';
 import '../../services/services.dart';
-import '../account_home_screen.dart';
+import '../home_shell.dart';
 import '../intro_screen.dart';
 import 'about_step.dart';
 import 'method_step.dart';
@@ -64,7 +64,7 @@ class _SignUpFlowState extends State<SignUpFlow> {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
           builder: (_) =>
-              AccountHomeScreen(account: account, isNewAccount: true),
+              HomeShell(account: account, isNewAccount: true),
         ),
         (_) => false,
       );
