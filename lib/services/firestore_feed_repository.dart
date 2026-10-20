@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 import '../models/account.dart';
+import '../models/media.dart';
 import '../models/post.dart';
 import '../models/sign_up_data.dart';
 import 'feed_repository.dart';
@@ -12,10 +14,12 @@ import 'feed_repository.dart';
 /// `users/{uid}/contributions`, so deleting an account can find and delete
 /// everything they wrote (PDPA: withdrawing consent).
 class FirestoreFeedRepository implements FeedRepository {
-  FirestoreFeedRepository({FirebaseFirestore? db})
-      : _db = db ?? FirebaseFirestore.instance;
+  FirestoreFeedRepository({FirebaseFirestore? db, FirebaseStorage? storage})
+      : _db = db ?? FirebaseFirestore.instance,
+        _storage = storage ?? FirebaseStorage.instance;
 
   final FirebaseFirestore _db;
+  final FirebaseStorage _storage;
 
   CollectionReference<Map<String, dynamic>> get _posts =>
       _db.collection('posts');
@@ -86,6 +90,8 @@ class FirestoreFeedRepository implements FeedRepository {
     final ref = _posts.doc();
     final journey = draft.anonymous ? null : draft.journey;
     final minor = FeedRules.isMinor(author);
+    final target = draft.respondingTo;
+    final preview = target == null ? null : _preview(target.text);
     final batch = _db.batch()
       ..set(ref, {
         'type': draft.type.name,
@@ -98,14 +104,27 @@ class FirestoreFeedRepository implements FeedRepository {
         'anonymous': draft.anonymous,
         'answered': false,
         'replyCount': 0,
+        'responseCount': 0,
         'beenThereCount': 0,
+        'media': [for (final m in draft.media) m.toMap()],
         if (!draft.anonymous) ..._authorFields(Author.of(author)),
         if (journey != null) ...{
           'journeyId': journey.id,
           'journeyTitle': journey.title,
         },
+        if (target != null) ...{
+          'respondsToId': target.id,
+          'respondsToText': preview,
+        },
       })
       ..set(_postAuthor(ref.id), {'uid': author.uid});
+    if (target != null) {
+      // lastResponseId lets the rules check the count matches a real post.
+      batch.update(_posts.doc(target.id), {
+        'responseCount': FieldValue.increment(1),
+        'lastResponseId': ref.id,
+      });
+    }
     _record(batch, author.uid, ref);
     _record(batch, author.uid, _postAuthor(ref.id));
     await batch.commit();
@@ -121,7 +140,55 @@ class FirestoreFeedRepository implements FeedRepository {
       replyPolicy: draft.replyPolicy,
       journeyId: journey?.id,
       journeyTitle: journey?.title,
+      media: draft.media,
+      respondsToId: target?.id,
+      respondsToText: preview,
     );
+  }
+
+  static String _preview(String text) => text.length <= respondsToPreviewLength
+      ? text
+      : '${text.substring(0, respondsToPreviewLength - 1)}…';
+
+  @override
+  Future<List<Post>> responsesTo(String postId) async {
+    final snapshot = await _posts
+        .where('respondsToId', isEqualTo: postId)
+        .orderBy('createdAt')
+        .get();
+    return [for (final doc in snapshot.docs) _postFrom(doc.id, doc.data())];
+  }
+
+  @override
+  Future<List<Post>> postsBy(Account owner) async {
+    // The owner's private contribution list includes anonymous posts, which
+    // can't be found any other way.
+    final contributions = await _contributions(owner.uid).get();
+    final ids = [
+      for (final c in contributions.docs)
+        if (_isPostPath(c.data()['path'] as String? ?? ''))
+          (c.data()['path'] as String).split('/')[1],
+    ];
+    final docs = await Future.wait([for (final id in ids) _posts.doc(id).get()]);
+    final posts = [
+      for (final d in docs)
+        if (d.data() case final data?) _postFrom(d.id, data),
+    ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return posts;
+  }
+
+  static bool _isPostPath(String path) {
+    final parts = path.split('/');
+    return parts.length == 2 && parts[0] == 'posts';
+  }
+
+  @override
+  Future<List<Post>> postsInJourney(String journeyId) async {
+    final snapshot = await _posts
+        .where('journeyId', isEqualTo: journeyId)
+        .orderBy('createdAt')
+        .get();
+    return [for (final doc in snapshot.docs) _postFrom(doc.id, doc.data())];
   }
 
   @override
@@ -137,13 +204,15 @@ class FirestoreFeedRepository implements FeedRepository {
   }
 
   @override
-  Future<Reply> addReply(Account author, Post post, String text) async {
+  Future<Reply> addReply(Account author, Post post, String text,
+      {Reply? parent}) async {
     final postRef = _posts.doc(post.id);
     final ref = postRef.collection('replies').doc();
     final minor = FeedRules.isMinor(author);
     final batch = _db.batch()
       ..set(ref, {
         ..._authorFields(Author.of(author)),
+        if (parent != null) 'parentReplyId': parent.id,
         'authorRole': author.profile.role!.name,
         'minorAuthor': minor,
         'text': text.trim(),
@@ -161,6 +230,7 @@ class FirestoreFeedRepository implements FeedRepository {
     return Reply(
       id: ref.id,
       postId: post.id,
+      parentReplyId: parent?.id,
       author: Author.of(author),
       minorAuthor: minor,
       text: text.trim(),
@@ -263,12 +333,28 @@ class FirestoreFeedRepository implements FeedRepository {
   @override
   Future<void> deleteContributions(Account account) async {
     final contributions = await _contributions(account.uid).get();
-    // Author links go last: the rules check them when deleting a post.
-    final docs = [...contributions.docs]..sort((a, b) {
-        bool isLink(QueryDocumentSnapshot<Map<String, dynamic>> d) =>
-            (d.data()['path'] as String).startsWith('postAuthors/');
-        return (isLink(a) ? 1 : 0) - (isLink(b) ? 1 : 0);
-      });
+    // Storage files first, and ownership links (author, media owner) last:
+    // the rules check those links when deleting posts and files.
+    int rank(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+      final path = d.data()['path'] as String;
+      if (d.data()['storage'] == true) return 0;
+      if (path.startsWith('postAuthors/') || path.startsWith('mediaOwners/')) {
+        return 2;
+      }
+      return 1;
+    }
+
+    final docs = [...contributions.docs]
+      ..sort((a, b) => rank(a) - rank(b));
+    for (final c in docs.where((d) => rank(d) == 0)) {
+      try {
+        await _storage.ref(c.data()['path'] as String).delete();
+      } on FirebaseException catch (e) {
+        if (e.code != 'object-not-found') rethrow;
+      }
+      await c.reference.delete();
+    }
+    docs.removeWhere((d) => rank(d) == 0);
     // Firestore batches hold up to 500 writes; each item is two deletes.
     const chunk = 200;
     for (var i = 0; i < docs.length; i += chunk) {
@@ -316,8 +402,15 @@ class FirestoreFeedRepository implements FeedRepository {
             _enum(ReplyPolicy.values, d['replyPolicy']) ?? ReplyPolicy.none,
         journeyId: d['journeyId'] as String?,
         journeyTitle: d['journeyTitle'] as String?,
+        media: [
+          for (final m in (d['media'] as List?) ?? const [])
+            MediaItem.fromMap(Map<String, dynamic>.from(m as Map)),
+        ],
+        respondsToId: d['respondsToId'] as String?,
+        respondsToText: d['respondsToText'] as String?,
         answered: d['answered'] as bool? ?? false,
         replyCount: (d['replyCount'] as num?)?.toInt() ?? 0,
+        responseCount: (d['responseCount'] as num?)?.toInt() ?? 0,
         beenThereCount: (d['beenThereCount'] as num?)?.toInt() ?? 0,
       );
 
@@ -325,6 +418,7 @@ class FirestoreFeedRepository implements FeedRepository {
       Reply(
         id: id,
         postId: postId,
+        parentReplyId: d['parentReplyId'] as String?,
         author: _authorFrom(d)!,
         minorAuthor: d['minorAuthor'] as bool? ?? true,
         text: d['text'] as String? ?? '',

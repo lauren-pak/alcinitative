@@ -21,7 +21,19 @@ abstract class FeedRepository {
 
   Future<List<Reply>> replies(String postId);
 
-  Future<Reply> addReply(Account author, Post post, String text);
+  /// [parent] makes it a reply to another reply (a nested thread).
+  Future<Reply> addReply(Account author, Post post, String text,
+      {Reply? parent});
+
+  /// Posts written in response to [postId], oldest first.
+  Future<List<Post>> responsesTo(String postId);
+
+  /// Everything [owner] posted, newest first, including anonymous posts
+  /// (only ever shown to the owner).
+  Future<List<Post>> postsBy(Account owner);
+
+  /// Posts tagged into [journeyId], oldest first.
+  Future<List<Post>> postsInJourney(String journeyId);
 
   Future<bool> hasBeenThere(String postId, Account viewer);
 
@@ -41,6 +53,6 @@ abstract class FeedRepository {
   Future<Journey> createJourney(Account owner, String title);
 
   /// Deletes everything [account] contributed (posts, replies, reactions,
-  /// journeys). Part of account deletion.
+  /// journeys, photos and videos). Part of account deletion.
   Future<void> deleteContributions(Account account);
 }

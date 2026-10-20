@@ -45,6 +45,9 @@ class PrivacyNoticeScreen extends StatelessWidget {
                     'depending on how you sign in.',
                 'What you post: your posts, replies, journeys and '
                     'reactions like "Been there" and "Helpful".',
+                'Photos and videos you add to posts. We remove the '
+                    'location and camera details hidden inside them before '
+                    'they are uploaded.',
                 "An athlete ID we make for you. We don't collect your "
                     'location.',
               ],
@@ -74,6 +77,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 'Your posts and replies can be seen by members who are '
                     'logged in, with your name and sport. Nobody outside '
                     'the app can see them.',
+                'Photos and videos can only be seen inside the app by '
+                    'logged-in members. There are no public links to them.',
                 'If you post anonymously, other members don\'t see your '
                     'name. Our moderators can still see who posted, to keep '
                     'everyone safe.',
@@ -95,8 +100,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
               points: [
                 'For as long as you have an account.',
                 'When you delete your account, we delete your profile, '
-                    'your athlete ID, your posts, replies and reactions, '
-                    'and your sign-in details.',
+                    'your athlete ID, your posts, replies, reactions, '
+                    'photos and videos, and your sign-in details.',
               ],
             ),
             const _Section(
@@ -115,6 +120,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
               title: 'If you are under 18',
               points: [
                 'You need to be 13 or older to join.',
+                "Under-18s can add photos, but not videos yet. Videos "
+                    'will be checked by a moderator first.',
                 "If you're 13 to 17, only agree if you understand this "
                     'notice. If anything is unclear, read it with a parent '
                     'or guardian first.',

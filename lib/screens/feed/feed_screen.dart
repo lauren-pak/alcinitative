@@ -5,11 +5,11 @@ import '../../models/post.dart';
 import '../../models/sign_up_data.dart';
 import '../../services/services.dart';
 import '../../widgets/feed_widgets.dart';
-import 'compose_post_screen.dart';
 import 'post_detail_screen.dart';
 
 /// The feed: "For you" (questions needing answers, then the latest posts in
-/// the member's topics), then one tab per topic.
+/// the member's topics), then one tab per topic. New posts are started from
+/// the bottom bar in `HomeShell`, which rebuilds this screen afterwards.
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key, required this.account});
 
@@ -20,26 +20,15 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  /// Bumped after posting, to reload every tab.
-  int _generation = 0;
+  /// Part of each tab's key; fixed per FeedScreen instance.
+  static const _generation = 0;
 
   Set<Topic> get _myTopics => widget.account.profile.topics.isEmpty
       ? Topic.values.toSet()
       : widget.account.profile.topics;
 
-  Future<void> _compose() async {
-    final created = await Navigator.of(context).push<Post>(
-      MaterialPageRoute(
-        builder: (_) => ComposePostScreen(account: widget.account),
-      ),
-    );
-    if (created != null && mounted) setState(() => _generation++);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final isPublic = widget.account.profile.role == UserRole.public;
-
     return DefaultTabController(
       length: 1 + Topic.values.length,
       child: Scaffold(
@@ -77,11 +66,6 @@ class _FeedScreenState extends State<FeedScreen> {
                 needsAnswerLimit: 3,
               ),
           ],
-        ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _compose,
-          icon: Icon(isPublic ? Icons.help_outline : Icons.edit_outlined),
-          label: Text(isPublic ? 'Ask a question' : 'New post'),
         ),
       ),
     );

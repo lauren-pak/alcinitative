@@ -1,4 +1,5 @@
 import 'account.dart';
+import 'media.dart';
 import 'sign_up_data.dart';
 
 enum PostType {
@@ -70,8 +71,12 @@ class Post {
     this.author,
     this.journeyId,
     this.journeyTitle,
+    this.media = const [],
+    this.respondsToId,
+    this.respondsToText,
     this.answered = false,
     this.replyCount = 0,
+    this.responseCount = 0,
     this.beenThereCount = 0,
   });
 
@@ -91,12 +96,28 @@ class Post {
   final String? journeyId;
   final String? journeyTitle;
 
+  /// Up to 4 photos, or 1 video.
+  final List<MediaItem> media;
+
+  /// Set when this post responds to another post; it then also appears in
+  /// that post's comments.
+  final String? respondsToId;
+
+  /// The start of the post this responds to, for the "In response to" line.
+  final String? respondsToText;
+
   /// A question whose asker marked a reply "This helped me".
   final bool answered;
   final int replyCount;
+
+  /// Posts written in response to this one.
+  final int responseCount;
   final int beenThereCount;
 
   bool get anonymous => author == null;
+
+  /// Replies plus response posts.
+  int get commentCount => replyCount + responseCount;
 
   /// Label for the post's author line.
   String get authorName => author?.name ?? 'Anonymous ${_roleNoun()}';
@@ -117,6 +138,7 @@ class Post {
   Post copyWith({
     bool? answered,
     int? replyCount,
+    int? responseCount,
     int? beenThereCount,
   }) =>
       Post(
@@ -131,8 +153,12 @@ class Post {
         replyPolicy: replyPolicy,
         journeyId: journeyId,
         journeyTitle: journeyTitle,
+        media: media,
+        respondsToId: respondsToId,
+        respondsToText: respondsToText,
         answered: answered ?? this.answered,
         replyCount: replyCount ?? this.replyCount,
+        responseCount: responseCount ?? this.responseCount,
         beenThereCount: beenThereCount ?? this.beenThereCount,
       );
 }
@@ -145,12 +171,16 @@ class Reply {
     required this.minorAuthor,
     required this.text,
     required this.createdAt,
+    this.parentReplyId,
     this.helpfulCount = 0,
     this.helpedAsker = false,
   });
 
   final String id;
   final String postId;
+
+  /// The reply this one answers; null for a reply to the post itself.
+  final String? parentReplyId;
   final Author author;
   final bool minorAuthor;
   final String text;
@@ -163,6 +193,7 @@ class Reply {
   Reply copyWith({int? helpfulCount, bool? helpedAsker}) => Reply(
         id: id,
         postId: postId,
+        parentReplyId: parentReplyId,
         author: author,
         minorAuthor: minorAuthor,
         text: text,
@@ -189,7 +220,16 @@ class NewPost {
   ReplyPolicy replyPolicy = ReplyPolicy.athletes;
   bool anonymous = false;
   Journey? journey;
+
+  /// Uploaded before the post is saved.
+  List<MediaItem> media = [];
+
+  /// The post this one responds to, if any.
+  Post? respondingTo;
 }
+
+/// Length of the quote shown in "In response to".
+const respondsToPreviewLength = 120;
 
 const maxPostLength = 2000;
 const maxReplyLength = 1000;
@@ -213,8 +253,15 @@ class FeedRules {
               "moderator first. That's coming soon."
           : null;
 
-  /// Null if [viewer] may reply to [post].
-  static String? replyBlockedFor(Account viewer, Post post) {
+  /// Under-18 videos need moderator review first (stage 2).
+  static String? videoBlockedFor(Account a) => isMinor(a)
+      ? "Videos from under-18s are checked by a moderator first. That's "
+          'coming soon. You can add photos.'
+      : null;
+
+  /// Null if [viewer] may reply to [post], or to [parent] within it.
+  /// Response posts follow the same rules as replies.
+  static String? replyBlockedFor(Account viewer, Post post, {Reply? parent}) {
     if (post.replyPolicy == ReplyPolicy.none) return 'Replies are turned off.';
     if (post.replyPolicy == ReplyPolicy.athletes &&
         viewer.profile.role != UserRole.athlete) {
@@ -223,6 +270,9 @@ class FeedRules {
     // Adult replies to under-18s will need moderator review (stage 2).
     if (post.minorAuthor && !isMinor(viewer)) {
       return 'Only under-18s can reply to this post.';
+    }
+    if (parent != null && parent.minorAuthor && !isMinor(viewer)) {
+      return 'Only under-18s can reply to this reply.';
     }
     return null;
   }

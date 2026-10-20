@@ -1,3 +1,5 @@
+import 'display_mode.dart';
+
 enum UserRole {
   athlete('Athlete', 'Share your experiences and give advice to other athletes.'),
   public('General public', 'Follow athletes, learn from them and ask questions.');
@@ -113,6 +115,9 @@ class SignUpData {
   /// When the member agreed to the Privacy Notice (PDPA consent).
   DateTime? consentGivenAt;
 
+  /// Standard or Easy view. Private: only the member sees it.
+  DisplayMode displayMode = DisplayMode.standard;
+
   /// The sport to display, using the typed-in name for "Other".
   String? get sportName => sport == otherSport ? customSport : sport;
 
@@ -131,5 +136,6 @@ class SignUpData {
     ..level = level
     ..category = category
     ..topics.addAll(topics)
-    ..consentGivenAt = consentGivenAt;
+    ..consentGivenAt = consentGivenAt
+    ..displayMode = displayMode;
 }

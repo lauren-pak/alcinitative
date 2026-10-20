@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../config/support_config.dart';
 import '../models/post.dart';
 import '../models/sign_up_data.dart';
+import 'media_widgets.dart';
 
 /// Picture icon for each topic, used everywhere the topic appears.
 IconData topicIcon(Topic topic) => switch (topic) {
@@ -179,6 +180,10 @@ class PostCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               PostHeader(post: post),
+              if (post.respondsToText != null) ...[
+                const SizedBox(height: 8),
+                RespondsToLine(text: post.respondsToText!),
+              ],
               const SizedBox(height: 10),
               Wrap(
                 spacing: 6,
@@ -209,6 +214,10 @@ class PostCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: textTheme.bodyLarge,
               ),
+              if (post.media.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                MediaPreviewGrid(media: post.media),
+              ],
               if (post.needsAdviceBanner) ...[
                 const SizedBox(height: 10),
                 AdviceBanner(topic: post.topic, compact: true),
@@ -234,9 +243,7 @@ class PostCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    post.replyCount == 1
-                        ? '1 reply'
-                        : '${post.replyCount} replies',
+                    commentLabel(post.commentCount),
                     style: textTheme.bodySmall,
                   ),
                 ],
@@ -297,6 +304,39 @@ class PostHeader extends StatelessWidget {
           ),
         ),
         Text(timeAgo(context, post.createdAt), style: textTheme.bodySmall),
+      ],
+    );
+  }
+}
+
+String commentLabel(int count) => count == 1 ? '1 comment' : '$count comments';
+
+/// The "In response to: ..." line on response posts.
+class RespondsToLine extends StatelessWidget {
+  const RespondsToLine({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.subdirectory_arrow_right,
+            size: 16, color: scheme.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            'In response to: "$text"',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontStyle: FontStyle.italic),
+          ),
+        ),
       ],
     );
   }

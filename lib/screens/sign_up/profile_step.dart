@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../models/display_mode.dart';
 import '../../models/sign_up_data.dart';
 
 /// Sport, level, programme and topics. Also used to edit a saved profile.
@@ -27,6 +28,12 @@ class _ProfileStepState extends State<ProfileStep> {
   String? _error;
 
   bool get _isAthlete => widget.data.role == UserRole.athlete;
+
+  /// Saves the choice and shows it straight away.
+  void _setMode(DisplayMode mode) {
+    widget.data.displayMode = mode;
+    displayMode.value = mode;
+  }
 
   void _submit() {
     final data = widget.data;
@@ -133,8 +140,14 @@ class _ProfileStepState extends State<ProfileStep> {
                   ChoiceChip(
                     label: Text(category.label),
                     selected: data.category == category,
-                    onSelected: (on) =>
-                        setState(() => data.category = on ? category : null),
+                    onSelected: (on) => setState(() {
+                      data.category = on ? category : null;
+                      // Suggest Easy mode to Special Olympics athletes; they
+                      // can switch it off below.
+                      if (on && category == AthleteCategory.specialOlympics) {
+                        _setMode(DisplayMode.easy);
+                      }
+                    }),
                   ),
               ],
             ),
@@ -164,6 +177,20 @@ class _ProfileStepState extends State<ProfileStep> {
                   }),
                 ),
             ],
+          ),
+          const SizedBox(height: 16),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.text_increase),
+            title: const Text('Easy mode'),
+            subtitle: const Text(
+              'Bigger text and buttons, and simpler screens. '
+              'You can change this any time.',
+            ),
+            value: data.displayMode == DisplayMode.easy,
+            onChanged: (on) => setState(
+              () => _setMode(on ? DisplayMode.easy : DisplayMode.standard),
+            ),
           ),
           if (_error != null) ...[
             const SizedBox(height: 16),

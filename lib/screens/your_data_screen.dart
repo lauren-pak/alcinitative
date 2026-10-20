@@ -5,13 +5,14 @@ import 'package:share_plus/share_plus.dart';
 
 import '../config/privacy_config.dart';
 import '../models/account.dart';
+import '../models/display_mode.dart';
 import '../models/sign_up_data.dart';
 import '../services/auth_service.dart';
 import '../services/services.dart';
-import 'account_home_screen.dart';
 import 'edit_profile_screen.dart';
 import 'intro_screen.dart';
 import 'privacy_notice_screen.dart';
+import 'profile/profile_screen.dart';
 
 /// PDPA rights in one place: see everything we hold (access), fix it
 /// (correction), download a copy, and delete the account (withdrawing
@@ -50,7 +51,7 @@ class _YourDataScreenState extends State<YourDataScreen> {
           .join(', '),
       'Athlete ID': _account.athleteId,
       'Joined': loc.formatCompactDate(_account.joinedAt),
-      'Signed in with': AccountHomeScreen.signInSummary() ?? '',
+      'Signed in with': signInSummary() ?? '',
       'Privacy Notice agreed': p.consentGivenAt == null
           ? 'Version $privacyNoticeVersion'
           : 'Version $privacyNoticeVersion on '
@@ -144,6 +145,7 @@ class _YourDataScreenState extends State<YourDataScreen> {
       'Your account and information have been deleted.',
     );
     if (!mounted) return;
+    displayMode.value = DisplayMode.standard;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const IntroScreen()),
       (_) => false,

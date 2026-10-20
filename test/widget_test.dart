@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:athlete_app/main.dart';
 import 'package:athlete_app/models/account.dart';
 import 'package:athlete_app/models/sign_up_data.dart';
-import 'package:athlete_app/screens/account_home_screen.dart';
+import 'package:athlete_app/screens/profile/profile_screen.dart';
 import 'package:athlete_app/screens/sign_up/profile_step.dart';
 import 'package:athlete_app/screens/your_data_screen.dart';
 import 'package:athlete_app/services/auth_service.dart';
@@ -67,6 +67,7 @@ void main() {
     Services.auth = auth;
     Services.profiles = profiles;
     Services.feed = InMemoryFeedRepository();
+    Services.media = FakeMediaRepository();
   });
 
   group('age rules', () {
@@ -298,9 +299,9 @@ void main() {
     // Returning members land on the feed; their ID is one tab away.
     expect(find.text('Needs an answer'), findsNothing);
     expect(find.text('No posts yet. Be the first to share.'), findsOneWidget);
-    await tester.tap(find.text('My ID'));
+    await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
-    expect(find.text('Welcome back, Sam!'), findsOneWidget);
+    expect(find.text('Sam Taylor'), findsOneWidget);
     expect(find.text(account.athleteId), findsOneWidget);
   });
 
@@ -312,7 +313,7 @@ void main() {
     expect(find.text('Finish signing up · 1 of 3'), findsOneWidget);
   });
 
-  testWidgets('account screen shows the ID card without date of birth',
+  testWidgets('profile shows the ID card without date of birth',
       (tester) async {
     final account = await profiles.create(
       'u1',
@@ -322,7 +323,7 @@ void main() {
     );
 
     await tester.pumpWidget(MaterialApp(
-      home: AccountHomeScreen(account: account, isNewAccount: true),
+      home: ProfileScreen(account: account, isNewAccount: true),
     ));
 
     expect(find.text('Welcome, Sam!'), findsOneWidget);

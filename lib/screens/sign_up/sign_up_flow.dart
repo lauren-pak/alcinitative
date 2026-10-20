@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../models/display_mode.dart';
 import '../../models/sign_up_data.dart';
 import '../../services/auth_service.dart';
 import '../../services/services.dart';
@@ -35,6 +36,8 @@ class _SignUpFlowState extends State<SignUpFlow> {
   @override
   void initState() {
     super.initState();
+    // Carry over the intro page's Easy mode choice.
+    _data.displayMode = displayMode.value;
     final user = widget.resumeUser;
     if (user != null) {
       _data

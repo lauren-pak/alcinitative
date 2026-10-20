@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../config/privacy_config.dart';
 import '../models/account.dart';
+import '../models/display_mode.dart';
 import '../models/sign_up_data.dart';
 import 'profile_repository.dart';
 
@@ -32,7 +33,9 @@ class FirestoreProfileRepository implements ProfileRepository {
       ..dateOfBirth = (data['dateOfBirth'] as Timestamp).toDate()
       ..method = _enum(SignUpMethod.values, data['signUpMethod'])
       ..consentGivenAt =
-          (data['consent']?['acceptedAt'] as Timestamp?)?.toDate();
+          (data['consent']?['acceptedAt'] as Timestamp?)?.toDate()
+      ..displayMode =
+          _enum(DisplayMode.values, data['displayMode']) ?? DisplayMode.standard;
     return Account(
       uid: uid,
       athleteId: data['athleteId'] as String,
@@ -58,6 +61,7 @@ class FirestoreProfileRepository implements ProfileRepository {
         tx.set(_users.doc(uid), {
           ..._publicFields(profile),
           'topics': [for (final t in profile.topics) t.name],
+          'displayMode': profile.displayMode.name,
           'signUpMethod': profile.method?.name,
           'dateOfBirth': Timestamp.fromDate(dobUtc),
           'adultFrom': Timestamp.fromDate(adultFromBirthDate(dobUtc)),
@@ -91,6 +95,7 @@ class FirestoreProfileRepository implements ProfileRepository {
       ..update(_users.doc(account.uid), {
         ..._publicFields(profile),
         'topics': [for (final t in profile.topics) t.name],
+        'displayMode': profile.displayMode.name,
       })
       ..update(_cards.doc(account.athleteId), _publicFields(profile));
     await batch.commit();

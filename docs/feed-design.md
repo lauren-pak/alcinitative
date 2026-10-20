@@ -15,14 +15,27 @@ The feed is where athletes share sporting experiences and get advice from each o
 |---|---|
 | **Experience** | Sharing what happened ("How I came back from a stress fracture"). |
 | **Question** | Asking for advice. Shows **Answered** once the asker marks a reply "This helped me". |
+| **Response post** | Either type, written in response to another post (`respondsToId`). It appears in the feed with "In response to: …" and in the original post's comments thread as a linked card. It follows the same permission rules as a reply to that post. |
 
 - **Journeys** work like playlists. A member creates a named journey ("ACL rehab 2026") and tags their posts into it. Others can follow a journey.
-- **Media** (stage 3): photos and video. Location metadata is stripped on upload. Under-18 videos are held for review.
+- **Media** (built): up to 4 photos or 1 video (60 s) per post.
+  - Photos are re-encoded in Dart with no metadata (`cleanPhoto`).
+  - Videos are re-exported on iOS with `AVMetadataItemFilter.forSharing()` (native `VideoPrep` in `AppDelegate.swift`), which a test confirmed removes GPS tags. Android video isn't supported yet.
+  - Files sit at `media/{id}` in Cloud Storage (asia-southeast1), with the owner in a private `mediaOwners/{id}`, so anonymous posts stay anonymous.
+  - Media is only fetched through the rules, never via public download URLs.
+  - Under-18s can't add videos until moderator review exists.
 - **Anonymous:** the poster can hide their name. Other members see "Anonymous athlete" (or "Anonymous member") with no sport or level, because those could identify someone in a small sport. The author is still recorded privately for moderation and for the author's own edit or delete.
 - **Who can reply:** the poster picks **Athletes** (default), **Everyone** or **No replies**.
   - General public members can only reply where the poster chose Everyone.
   - Under-18 posts: see "Adults and under-18s" below.
 - **General public members** can read, react and post **Questions**, labelled "Question from the public". They can't post experiences or journeys.
+
+## Comments thread
+
+A post's comments are its replies plus its response posts.
+- Replies can be replied to (`parentReplyId`) and show indented, up to three levels.
+- Adults can't reply to an under-18's reply, just as for under-18 posts.
+- Response posts slot into the thread by time.
 
 ## Reactions
 
@@ -47,9 +60,12 @@ The feed is where athletes share sporting experiences and get advice from each o
 - **Following:** adults need the young athlete's approval to follow them or their journeys (stage 3).
 - When adult replies launch, update `MinorProtectionsNotice` and the Privacy Notice (both currently promise "only other under-18s can comment"), and bump `privacyNoticeVersion`.
 
-## Profiles and following (stage 3)
+## Profiles and following
 
-- Tapping a name opens the ID card with two tabs, **Posts** and **Journeys**. Anonymous posts never appear there.
+- **Own profile (built):** the bottom bar's Profile tab shows the ID card, then **Posts** and **Journeys**.
+  - Posts include your anonymous posts, labelled "only you can see it is yours". They're found through your private contributions list.
+  - A journey opens as a playlist of its posts, oldest first.
+- **Other people's profiles (stage 3):** tapping a name opens their card and posts. Their anonymous posts never appear there.
 - Members can follow athletes and journeys (with adult→under-18 approval, as above).
 
 ## Notifications (stage 3)
@@ -68,7 +84,8 @@ Replies to my post, new posts in journeys I follow, questions I could answer (my
 |---|---|---|
 | `posts/{postId}` | signed-in members | type, topic, text, createdAt, `replyPolicy`, `minorAuthor`, `anonymous`, author card fields (**omitted when anonymous**), journey id and title, `answered`, counters |
 | `postAuthors/{postId}` | the author only | `uid`. The private author link, so anonymous posts still have an owner |
-| `posts/{postId}/replies/{replyId}` | signed-in members | author card fields, `minorAuthor`, text, `helpfulCount`, `helpedAsker` |
+| `posts/{postId}/replies/{replyId}` | signed-in members | author card fields, `minorAuthor`, text, `helpfulCount`, `helpedAsker`, optional `parentReplyId` |
+| `mediaOwners/{mediaId}` | the owner only | `uid`, `kind`. Checked by `storage.rules` before uploads and deletes |
 | `posts/{postId}/beenThere/{uid}` | signed-in members | one doc per reaction (enforces one per person) |
 | `posts/{postId}/replies/{replyId}/helpful/{uid}` | signed-in members | one doc per Helpful mark |
 | `journeys/{journeyId}` | signed-in members | owner uid, title, createdAt (anonymous posts can't join journeys) |
@@ -79,7 +96,15 @@ Replies to my post, new posts in journeys I follow, questions I could answer (my
 
 ## Build stages
 
-1. **Text feed:** Experience and Question posts, journeys (create and tag), topic tabs with icons, Needs an answer, replies with poster controls, anonymous posting, Been there, Helpful plus disclaimer, This helped me, topic banners, help button. Public members ask questions only. Under-18s: replies from under-18s only, and no Sports nutrition posts yet.
+Navigation: the bottom bar is **Feed · New post · Profile** ("Home · Post · Me" in Easy mode).
+- **Posting is video-first.** New post (and Respond with a post) opens `CaptureScreen`: the front camera, ready to record (up to 60 s).
+- A **Video · Photo · Text** switch and a **Library** button cover other ways of posting.
+- In the standard view, the composer opens after capture with the media attached. A caption can be one word when there's media.
+- **Easy mode asks first:** topic → share or ask → *then* the camera (`CaptureScreen(returnMedia: true)`) → a few words → check and post. Closing the camera goes back a step, and "Record again" redoes the clip.
+- Under-18s start in Photo mode, with Video disabled until moderation exists.
+- With no camera (the simulator, a denied permission, or no answer within 5 s), the screen offers Library and Text instead.
+
+1. **Text feed** (built): Experience and Question posts, journeys (create and tag), topic tabs with icons, Needs an answer, replies with poster controls, anonymous posting, Been there, Helpful plus disclaimer, This helped me, topic banners, help button. Public members ask questions only. Under-18s: replies from under-18s only, and no Sports nutrition posts yet.
 2. **Safety:** report, block, mute, auto-hide, flagged words, moderator role and screen, review queues (under-18 nutrition, adult replies to under-18s), automatic moderation. Needs a server function (Blaze plan) and a moderation service.
-3. **Media and social:** photos and video, profiles with Posts and Journeys tabs, following, filters, search, in-app notifications.
+3. **Social:** other people's profiles, following, filters, search, in-app notifications. (Media, response posts, nested replies and the own profile were brought forward and are built.)
 4. **Accessibility and language:** easy-read mode, voice posts, read aloud, translations.

@@ -1,8 +1,13 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:athlete_app/models/account.dart';
+import 'package:athlete_app/models/media.dart';
 import 'package:athlete_app/models/post.dart';
 import 'package:athlete_app/models/sign_up_data.dart';
 import 'package:athlete_app/services/auth_service.dart';
 import 'package:athlete_app/services/feed_repository.dart';
+import 'package:athlete_app/services/media_repository.dart';
 import 'package:athlete_app/services/profile_repository.dart';
 
 /// In-memory stand-in for Firebase Auth.
@@ -189,20 +194,43 @@ class InMemoryFeedRepository implements FeedRepository {
       replyPolicy: draft.replyPolicy,
       journeyId: draft.anonymous ? null : draft.journey?.id,
       journeyTitle: draft.anonymous ? null : draft.journey?.title,
+      media: draft.media,
+      respondsToId: draft.respondingTo?.id,
+      respondsToText: draft.respondingTo?.text,
     );
     posts.add(post);
     _authors[post.id] = author.uid;
+    if (draft.respondingTo case final target?) {
+      final fresh = _fresh(target.id);
+      _replace(fresh.copyWith(responseCount: fresh.responseCount + 1));
+    }
     return post;
   }
+
+  @override
+  Future<List<Post>> responsesTo(String postId) async =>
+      posts.where((p) => p.respondsToId == postId).toList();
+
+  @override
+  Future<List<Post>> postsBy(Account owner) async => [
+        for (final p in posts.reversed)
+          if (_authors[p.id] == owner.uid) p,
+      ];
+
+  @override
+  Future<List<Post>> postsInJourney(String journeyId) async =>
+      posts.where((p) => p.journeyId == journeyId).toList();
 
   @override
   Future<List<Reply>> replies(String postId) async => [...?_replies[postId]];
 
   @override
-  Future<Reply> addReply(Account author, Post post, String text) async {
+  Future<Reply> addReply(Account author, Post post, String text,
+      {Reply? parent}) async {
     final reply = Reply(
       id: _id(),
       postId: post.id,
+      parentReplyId: parent?.id,
       author: Author.of(author),
       minorAuthor: FeedRules.isMinor(author),
       text: text.trim(),
@@ -278,4 +306,42 @@ class InMemoryFeedRepository implements FeedRepository {
     }
     journeys.removeWhere((j) => j.ownerUid == uid);
   }
+}
+
+/// In-memory stand-in for Cloud Storage.
+class FakeMediaRepository implements MediaRepository {
+  final files = <String, Uint8List>{};
+  int _next = 0;
+
+  @override
+  Future<MediaItem> uploadPhoto(Account owner, PreparedPhoto photo) async {
+    final item = MediaItem(
+      id: 'photo${_next++}',
+      kind: MediaKind.photo,
+      width: photo.width,
+      height: photo.height,
+    );
+    files[item.path] = Uint8List.fromList(photo.jpeg);
+    return item;
+  }
+
+  @override
+  Future<MediaItem> uploadVideo(Account owner, PreparedVideo video) async {
+    final item = MediaItem(
+      id: 'video${_next++}',
+      kind: MediaKind.video,
+      width: video.width,
+      height: video.height,
+      durationMs: video.durationMs,
+    );
+    files[item.path] = Uint8List(0);
+    return item;
+  }
+
+  @override
+  Future<Uint8List> imageBytes(String path) async =>
+      files[path] ?? (throw StateError('missing $path'));
+
+  @override
+  Future<File> videoFile(String path) async => throw UnimplementedError();
 }

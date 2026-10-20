@@ -4,8 +4,11 @@ import '../../models/account.dart';
 import '../../models/post.dart';
 import '../../services/services.dart';
 import '../../widgets/feed_widgets.dart';
+import '../../widgets/media_widgets.dart';
+import 'capture_screen.dart';
 
-/// A post with its replies, reactions and reply box.
+/// A post with its comments thread: replies (which can be replied to,
+/// shown indented) and response posts (shown as linked cards).
 class PostDetailScreen extends StatefulWidget {
   const PostDetailScreen({super.key, required this.post, required this.viewer});
 
@@ -16,15 +19,23 @@ class PostDetailScreen extends StatefulWidget {
   State<PostDetailScreen> createState() => _PostDetailScreenState();
 }
 
+/// Deeper replies are shown at this indent rather than drifting right.
+const _maxIndent = 3;
+
 class _PostDetailScreenState extends State<PostDetailScreen> {
   late Post _post = widget.post;
   List<Reply>? _replies;
+  List<Post> _responses = [];
   Set<String> _myHelpful = {};
   bool _beenThere = false;
   bool _isMine = false;
   bool _busy = false;
   String? _loadError;
+
+  /// The reply being answered, or null to reply to the post.
+  Reply? _replyingTo;
   final _replyText = TextEditingController();
+  final _replyFocus = FocusNode();
 
   @override
   void initState() {
@@ -35,6 +46,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   void dispose() {
     _replyText.dispose();
+    _replyFocus.dispose();
     super.dispose();
   }
 
@@ -44,6 +56,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       final results = await Future.wait([
         feed.getPost(_post.id),
         feed.replies(_post.id),
+        feed.responsesTo(_post.id),
         feed.hasBeenThere(_post.id, widget.viewer),
         feed.isMine(_post, widget.viewer),
       ]);
@@ -53,29 +66,25 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       setState(() {
         _post = (results[0] as Post?) ?? _post;
         _replies = replies;
-        _beenThere = results[2] as bool;
-        _isMine = results[3] as bool;
+        _responses = results[2] as List<Post>;
+        _beenThere = results[3] as bool;
+        _isMine = results[4] as bool;
         _myHelpful = helpful;
         _loadError = null;
       });
     } catch (_) {
       if (mounted) {
-        setState(() => _loadError = "Couldn't load replies. Pull to retry.");
+        setState(() => _loadError = "Couldn't load comments. Pull to retry.");
       }
     }
   }
 
-  /// The reply that helped the asker first, then most helpful, then oldest.
-  List<Reply> get _sortedReplies {
-    final replies = [...?_replies];
-    replies.sort((a, b) {
-      if (a.helpedAsker != b.helpedAsker) return a.helpedAsker ? -1 : 1;
-      if (a.helpfulCount != b.helpfulCount) {
-        return b.helpfulCount - a.helpfulCount;
-      }
-      return a.createdAt.compareTo(b.createdAt);
-    });
-    return replies;
+  /// Best first: the reply that helped the asker, then most Helpful, then
+  /// oldest.
+  static int _byHelpfulness(Reply a, Reply b) {
+    if (a.helpedAsker != b.helpedAsker) return a.helpedAsker ? -1 : 1;
+    if (a.helpfulCount != b.helpfulCount) return b.helpfulCount - a.helpfulCount;
+    return a.createdAt.compareTo(b.createdAt);
   }
 
   Future<void> _run(Future<void> Function() action, String failure) async {
@@ -129,28 +138,130 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         });
       }, "Couldn't save that. Try again.");
 
+  void _startReplyTo(Reply reply) {
+    setState(() => _replyingTo = reply);
+    _replyFocus.requestFocus();
+  }
+
   Future<void> _sendReply() async {
     final text = _replyText.text.trim();
     if (text.isEmpty) return;
     await _run(() async {
-      final reply = await Services.feed.addReply(widget.viewer, _post, text);
+      final reply = await Services.feed
+          .addReply(widget.viewer, _post, text, parent: _replyingTo);
       if (!mounted) return;
       _replyText.clear();
       FocusScope.of(context).unfocus();
       setState(() {
         _replies = [...?_replies, reply];
+        _replyingTo = null;
         _post = _post.copyWith(replyCount: _post.replyCount + 1);
       });
     }, "Couldn't send your reply. Try again.");
+  }
+
+  Future<void> _respondWithPost() async {
+    final created = await Navigator.of(context).push<Post>(
+      MaterialPageRoute(
+        builder: (_) => CaptureScreen(
+          account: widget.viewer,
+          respondingTo: _post,
+        ),
+      ),
+    );
+    if (created != null && mounted) _load();
+  }
+
+  Future<void> _openPost(Post post) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PostDetailScreen(post: post, viewer: widget.viewer),
+      ),
+    );
+    if (mounted) _load();
+  }
+
+  /// Top-level comments: replies to the post and response posts, best
+  /// replies first, then by time.
+  List<Widget> _thread() {
+    final replies = _replies ?? const [];
+    final children = <String, List<Reply>>{};
+    for (final r in replies) {
+      if (r.parentReplyId != null) {
+        (children[r.parentReplyId!] ??= []).add(r);
+      }
+    }
+    final topLevel = replies.where((r) => r.parentReplyId == null).toList()
+      ..sort(_byHelpfulness);
+    final canMarkHelped =
+        _isMine && _post.type == PostType.question && !_post.answered;
+
+    Iterable<Widget> replyTree(Reply reply, int depth) sync* {
+      yield Padding(
+        padding: EdgeInsets.only(left: 20.0 * depth.clamp(0, _maxIndent)),
+        child: _ReplyTile(
+          reply: reply,
+          isNested: depth > 0,
+          markedHelpful: _myHelpful.contains(reply.id),
+          onHelpful: _busy ? null : () => _toggleHelpful(reply),
+          onReply: FeedRules.replyBlockedFor(widget.viewer, _post,
+                      parent: reply) ==
+                  null
+              ? () => _startReplyTo(reply)
+              : null,
+          onHelpedMe:
+              canMarkHelped && !_busy ? () => _markHelped(reply) : null,
+        ),
+      );
+      // A copy: sorting the shared (or empty const) list would throw.
+      final kids = [...?children[reply.id]]
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      for (final child in kids) {
+        yield* replyTree(child, depth + 1);
+      }
+    }
+
+    // Merge response posts in by time, after replies the asker marked.
+    final items = <(DateTime, Widget)>[
+      for (final r in topLevel)
+        (
+          r.helpedAsker ? DateTime(0) : r.createdAt,
+          Column(children: [...replyTree(r, 0)]),
+        ),
+      for (final p in _responses)
+        (
+          p.createdAt,
+          _ResponseCard(post: p, onTap: () => _openPost(p)),
+        ),
+    ];
+    // Keep the helpfulness order of replies; slot responses in by time.
+    final ordered = <Widget>[];
+    final responses = items.where((i) => i.$2 is _ResponseCard).toList()
+      ..sort((a, b) => a.$1.compareTo(b.$1));
+    final replyItems = items.where((i) => i.$2 is! _ResponseCard).toList();
+    var ri = 0;
+    for (final reply in replyItems) {
+      while (ri < responses.length && responses[ri].$1.isBefore(reply.$1)) {
+        ordered.add(responses[ri++].$2);
+      }
+      ordered.add(reply.$2);
+    }
+    while (ri < responses.length) {
+      ordered.add(responses[ri++].$2);
+    }
+    return ordered;
   }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final post = _post;
-    final replyBlocked = FeedRules.replyBlockedFor(widget.viewer, post);
-    final canMarkHelped =
-        _isMine && post.type == PostType.question && !post.answered;
+    final postReplyBlocked = FeedRules.replyBlockedFor(widget.viewer, post);
+    final barBlocked = _replyingTo == null
+        ? postReplyBlocked
+        : FeedRules.replyBlockedFor(widget.viewer, post, parent: _replyingTo);
+    final commentCount = (_replies?.length ?? post.replyCount) +
+        (_replies == null ? post.responseCount : _responses.length);
 
     return Scaffold(
       appBar: AppBar(
@@ -174,6 +285,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   padding: const EdgeInsets.all(16),
                   children: [
                     PostHeader(post: post),
+                    if (post.respondsToText != null) ...[
+                      const SizedBox(height: 8),
+                      InkWell(
+                        onTap: () async {
+                          final original =
+                              await Services.feed.getPost(post.respondsToId!);
+                          if (original != null && mounted) _openPost(original);
+                        },
+                        child: RespondsToLine(text: post.respondsToText!),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 6,
@@ -198,32 +320,43 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ),
                     const SizedBox(height: 12),
                     SelectableText(post.text, style: textTheme.bodyLarge),
+                    if (post.media.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      PostMediaView(media: post.media),
+                    ],
                     if (post.needsAdviceBanner) ...[
                       const SizedBox(height: 12),
                       AdviceBanner(topic: post.topic),
                     ],
                     const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: _beenThere
-                          ? FilledButton.icon(
-                              onPressed: _busy ? null : _toggleBeenThere,
-                              icon: const Icon(Icons.handshake),
-                              label: Text('Been there · ${post.beenThereCount}'),
-                            )
-                          : OutlinedButton.icon(
-                              onPressed: _busy ? null : _toggleBeenThere,
-                              icon: const Icon(Icons.handshake_outlined),
-                              label: Text('Been there · ${post.beenThereCount}'),
-                            ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _beenThere
+                            ? FilledButton.icon(
+                                onPressed: _busy ? null : _toggleBeenThere,
+                                icon: const Icon(Icons.handshake),
+                                label:
+                                    Text('Been there · ${post.beenThereCount}'),
+                              )
+                            : OutlinedButton.icon(
+                                onPressed: _busy ? null : _toggleBeenThere,
+                                icon: const Icon(Icons.handshake_outlined),
+                                label:
+                                    Text('Been there · ${post.beenThereCount}'),
+                              ),
+                        if (postReplyBlocked == null)
+                          OutlinedButton.icon(
+                            onPressed: _respondWithPost,
+                            icon: const Icon(Icons.post_add),
+                            label: const Text('Respond with a post'),
+                          ),
+                      ],
                     ),
                     const Divider(height: 32),
-                    Text(
-                      post.replyCount == 1
-                          ? '1 reply'
-                          : '${post.replyCount} replies',
-                      style: textTheme.titleMedium,
-                    ),
+                    Text(commentLabel(commentCount),
+                        style: textTheme.titleMedium),
                     if (post.type == PostType.question) ...[
                       const SizedBox(height: 8),
                       const _HelpfulNote(),
@@ -236,28 +369,24 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         padding: EdgeInsets.all(24),
                         child: Center(child: CircularProgressIndicator()),
                       )
-                    else if (_replies!.isEmpty)
+                    else if (_replies!.isEmpty && _responses.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Text('No replies yet.',
+                        child: Text('No comments yet.',
                             style: textTheme.bodyMedium),
-                      ),
-                    for (final reply in _sortedReplies)
-                      _ReplyTile(
-                        reply: reply,
-                        markedHelpful: _myHelpful.contains(reply.id),
-                        onHelpful: _busy ? null : () => _toggleHelpful(reply),
-                        onHelpedMe: canMarkHelped && !_busy
-                            ? () => _markHelped(reply)
-                            : null,
-                      ),
+                      )
+                    else
+                      ..._thread(),
                   ],
                 ),
               ),
             ),
             _ReplyBar(
-              blockedReason: replyBlocked,
+              blockedReason: barBlocked,
+              replyingTo: _replyingTo,
+              onCancelReplyTo: () => setState(() => _replyingTo = null),
               controller: _replyText,
+              focusNode: _replyFocus,
               sending: _busy,
               onSend: _sendReply,
             ),
@@ -291,17 +420,70 @@ class _HelpfulNote extends StatelessWidget {
   }
 }
 
+/// A response post inside the comments thread.
+class _ResponseCard extends StatelessWidget {
+  const _ResponseCard({required this.post, required this.onTap});
+
+  final Post post;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const FeedChip(label: 'Response post', icon: Icons.post_add),
+              const SizedBox(height: 8),
+              PostHeader(post: post),
+              const SizedBox(height: 6),
+              Text(post.text,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodyMedium),
+              if (post.media.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                MediaPreviewGrid(media: post.media),
+              ],
+              const SizedBox(height: 6),
+              Text('Open post · ${commentLabel(post.commentCount)}',
+                  style: textTheme.labelMedium
+                      ?.copyWith(color: scheme.primary)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ReplyTile extends StatelessWidget {
   const _ReplyTile({
     required this.reply,
+    required this.isNested,
     required this.markedHelpful,
     required this.onHelpful,
+    required this.onReply,
     required this.onHelpedMe,
   });
 
   final Reply reply;
+  final bool isNested;
   final bool markedHelpful;
   final VoidCallback? onHelpful;
+  final VoidCallback? onReply;
   final VoidCallback? onHelpedMe;
 
   @override
@@ -310,13 +492,16 @@ class _ReplyTile extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 4, 0),
       decoration: BoxDecoration(
         color: reply.helpedAsker
             ? scheme.primaryContainer.withValues(alpha: 0.5)
             : scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(12),
+        border: isNested
+            ? Border(left: BorderSide(color: scheme.outlineVariant, width: 3))
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -330,21 +515,27 @@ class _ReplyTile extends StatelessWidget {
                 emphasis: true,
               ),
             ),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${reply.author.name} · ${reply.author.subtitle}',
-                  style: textTheme.labelLarge,
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${reply.author.name} · ${reply.author.subtitle}',
+                    style: textTheme.labelLarge,
+                  ),
                 ),
-              ),
-              Text(timeAgo(context, reply.createdAt),
-                  style: textTheme.bodySmall),
-            ],
+                Text(timeAgo(context, reply.createdAt),
+                    style: textTheme.bodySmall),
+              ],
+            ),
           ),
           const SizedBox(height: 4),
-          SelectableText(reply.text, style: textTheme.bodyMedium),
-          Row(
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: SelectableText(reply.text, style: textTheme.bodyMedium),
+          ),
+          Wrap(
             children: [
               TextButton.icon(
                 onPressed: onHelpful,
@@ -354,6 +545,12 @@ class _ReplyTile extends StatelessWidget {
                 ),
                 label: Text('Helpful · ${reply.helpfulCount}'),
               ),
+              if (onReply != null)
+                TextButton.icon(
+                  onPressed: onReply,
+                  icon: const Icon(Icons.reply, size: 18),
+                  label: const Text('Reply'),
+                ),
               if (onHelpedMe != null)
                 TextButton(
                   onPressed: onHelpedMe,
@@ -370,27 +567,54 @@ class _ReplyTile extends StatelessWidget {
 class _ReplyBar extends StatelessWidget {
   const _ReplyBar({
     required this.blockedReason,
+    required this.replyingTo,
+    required this.onCancelReplyTo,
     required this.controller,
+    required this.focusNode,
     required this.sending,
     required this.onSend,
   });
 
   final String? blockedReason;
+  final Reply? replyingTo;
+  final VoidCallback onCancelReplyTo;
   final TextEditingController controller;
+  final FocusNode focusNode;
   final bool sending;
   final VoidCallback onSend;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return Material(
       color: scheme.surfaceContainer,
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-          child: blockedReason != null
-              ? Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (replyingTo != null)
+                Row(
+                  children: [
+                    Icon(Icons.reply, size: 16, color: scheme.onSurfaceVariant),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text('Replying to ${replyingTo!.author.name}',
+                          style: textTheme.labelMedium),
+                    ),
+                    IconButton(
+                      tooltip: 'Cancel reply',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onCancelReplyTo,
+                      icon: const Icon(Icons.close, size: 18),
+                    ),
+                  ],
+                ),
+              if (blockedReason != null)
+                Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Row(
                     children: [
@@ -398,17 +622,18 @@ class _ReplyBar extends StatelessWidget {
                           size: 18, color: scheme.onSurfaceVariant),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(blockedReason!,
-                            style: Theme.of(context).textTheme.bodyMedium),
+                        child: Text(blockedReason!, style: textTheme.bodyMedium),
                       ),
                     ],
                   ),
                 )
-              : Row(
+              else
+                Row(
                   children: [
                     Expanded(
                       child: TextField(
                         controller: controller,
+                        focusNode: focusNode,
                         minLines: 1,
                         maxLines: 4,
                         maxLength: maxReplyLength,
@@ -427,6 +652,8 @@ class _ReplyBar extends StatelessWidget {
                     ),
                   ],
                 ),
+            ],
+          ),
         ),
       ),
     );

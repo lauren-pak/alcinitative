@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/display_mode.dart';
 import 'login_screen.dart';
 import 'sign_up/sign_up_flow.dart';
 
@@ -13,9 +14,27 @@ class IntroScreen extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
+      appBar: AppBar(
+        actions: [
+          // Visible before sign-up, so the simpler view helps from the start.
+          ValueListenableBuilder(
+            valueListenable: displayMode,
+            builder: (context, mode, _) => Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilterChip(
+                avatar: const Icon(Icons.text_increase, size: 18),
+                label: const Text('Easy mode'),
+                selected: mode == DisplayMode.easy,
+                onSelected: (on) => displayMode.value =
+                    on ? DisplayMode.easy : DisplayMode.standard,
+              ),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

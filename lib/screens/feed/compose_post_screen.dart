@@ -1,16 +1,36 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../models/account.dart';
+import '../../models/media.dart';
 import '../../models/post.dart';
 import '../../models/sign_up_data.dart';
+import '../../services/media_prep.dart';
 import '../../services/services.dart';
 import '../../widgets/feed_widgets.dart';
 
-/// Write an experience or a question. Pops with the created [Post].
+/// Write an experience or a question, optionally with photos or a video, or
+/// in response to another post. Pops with the created [Post].
 class ComposePostScreen extends StatefulWidget {
-  const ComposePostScreen({super.key, required this.account});
+  const ComposePostScreen({
+    super.key,
+    required this.account,
+    this.respondingTo,
+    this.initialVideo,
+    this.initialPhotos = const [],
+  });
 
   final Account account;
+
+  /// Captured on the camera screen, already cleaned.
+  final PreparedVideo? initialVideo;
+  final List<PreparedPhoto> initialPhotos;
+
+  /// The post this one responds to; it will also appear in its comments.
+  final Post? respondingTo;
 
   @override
   State<ComposePostScreen> createState() => _ComposePostScreenState();
@@ -20,19 +40,114 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
   static const _minLength = 10;
 
   final _draft = NewPost();
+  final _picker = ImagePicker();
   List<Journey> _journeys = [];
+  final List<PreparedPhoto> _photos = [];
+  PreparedVideo? _video;
+  bool _preparingMedia = false;
   bool _posting = false;
+  String? _progress;
   String? _error;
 
   Account get _account => widget.account;
   bool get _isAthlete => _account.profile.role == UserRole.athlete;
   bool get _isMinor => FeedRules.isMinor(_account);
+  bool get _hasMedia => _video != null || _photos.isNotEmpty;
+
+  /// A caption can be short when there's a video or photo.
+  int get _requiredLength => _hasMedia ? 1 : _minLength;
 
   @override
   void initState() {
     super.initState();
     _draft.type = FeedRules.postTypesFor(_account).first;
+    _video = widget.initialVideo;
+    _photos.addAll(widget.initialPhotos);
+    final target = widget.respondingTo;
+    if (target != null) {
+      _draft.respondingTo = target;
+      if (FeedRules.topicBlockedFor(_account, target.topic) == null) {
+        _draft.topic = target.topic;
+      }
+    }
     if (_isAthlete) _loadJourneys();
+  }
+
+  void _showError(String message) {
+    setState(() => _error = message);
+    // The form is long, so also show the problem where it can be seen.
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _addPhotos() async {
+    final room = maxPhotosPerPost - _photos.length;
+    if (room <= 0) return;
+    // requestFullMetadata: false avoids asking for full library access; the
+    // photos are cleaned of all metadata below either way.
+    final picked = await _picker.pickMultiImage(
+      limit: room,
+      maxWidth: 2048,
+      imageQuality: 90,
+      requestFullMetadata: false,
+    );
+    if (picked.isEmpty || !mounted) return;
+    setState(() => _preparingMedia = true);
+    try {
+      for (final file in picked.take(room)) {
+        final cleaned = await cleanPhotoInBackground(await file.readAsBytes());
+        if (!mounted) return;
+        setState(() => _photos.add(cleaned));
+      }
+    } catch (_) {
+      if (mounted) _showError("Couldn't add that photo. Try a different one.");
+    } finally {
+      if (mounted) setState(() => _preparingMedia = false);
+    }
+  }
+
+  Future<void> _addVideo() async {
+    if (FeedRules.videoBlockedFor(_account) case final reason?) {
+      _showError(reason);
+      return;
+    }
+    final picked = await _picker.pickVideo(
+      source: ImageSource.gallery,
+      maxDuration: maxVideoDuration,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _preparingMedia = true);
+    try {
+      final video = await prepareVideo(picked.path);
+      if (!mounted) return;
+      if (video.durationMs > maxVideoDuration.inMilliseconds + 1000) {
+        _showError('Videos can be up to ${maxVideoDuration.inSeconds} '
+            'seconds long. Trim it in Photos first.');
+        return;
+      }
+      setState(() => _video = video);
+    } catch (_) {
+      if (mounted) _showError("Couldn't add that video. Try a different one.");
+    } finally {
+      if (mounted) setState(() => _preparingMedia = false);
+    }
+  }
+
+  /// Uploads the picked media, returning the items to attach to the post.
+  Future<List<MediaItem>> _uploadMedia() async {
+    final media = Services.media;
+    final items = <MediaItem>[];
+    final total = _photos.length + (_video == null ? 0 : 1);
+    for (final photo in _photos) {
+      setState(() => _progress = 'Uploading ${items.length + 1} of $total…');
+      items.add(await media.uploadPhoto(_account, photo));
+    }
+    if (_video case final video?) {
+      setState(() => _progress = 'Uploading video…');
+      items.add(await media.uploadVideo(_account, video));
+    }
+    return items;
   }
 
   Future<void> _loadJourneys() async {
@@ -99,28 +214,33 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
       error = 'Choose a topic';
     } else if (FeedRules.topicBlockedFor(_account, topic) case final reason?) {
       error = reason;
-    } else if (_draft.text.trim().length < _minLength) {
-      error = 'Write at least $_minLength characters';
+    } else if (_draft.text.trim().length < _requiredLength) {
+      error = _hasMedia
+          ? 'Add a few words about it'
+          : 'Write at least $_minLength characters';
     }
-    setState(() => _error = error);
     if (error != null) {
-      // The form is long, so also show the problem where it can be seen.
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(error)));
+      _showError(error);
       return;
     }
 
-    setState(() => _posting = true);
+    setState(() {
+      _posting = true;
+      _error = null;
+    });
     try {
+      _draft.media = await _uploadMedia();
+      if (!mounted) return;
+      setState(() => _progress = 'Posting…');
       final post = await Services.feed.createPost(_account, _draft);
       if (mounted) Navigator.of(context).pop(post);
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _posting = false;
-        _error = "Couldn't post. Check your connection and try again.";
+        _progress = null;
       });
+      _showError("Couldn't post. Check your connection and try again.");
     }
   }
 
@@ -132,7 +252,11 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isAthlete ? 'New post' : 'Ask a question'),
+        title: Text(widget.respondingTo != null
+            ? 'Respond with a post'
+            : _isAthlete
+                ? 'New post'
+                : 'Ask a question'),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -150,6 +274,27 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              if (widget.respondingTo case final target?) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      RespondsToLine(text: target.text),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Your post will also appear in its comments.',
+                        style: textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               if (_isAthlete)
                 SegmentedButton<PostType>(
                   segments: const [
@@ -213,10 +358,16 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                 maxLength: maxPostLength,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
-                  labelText: isQuestion ? 'Your question' : 'Your experience',
+                  labelText: _hasMedia
+                      ? 'Caption'
+                      : isQuestion
+                          ? 'Your question'
+                          : 'Your experience',
                   hintText: isQuestion
                       ? 'What would you like advice on?'
-                      : 'What happened, and what did you learn?',
+                      : _hasMedia
+                          ? 'Say something about it'
+                          : 'What happened, and what did you learn?',
                   alignLabelWithHint: true,
                   border: const OutlineInputBorder(),
                 ),
@@ -225,7 +376,18 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                   _error = null;
                 }),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 4),
+              _MediaPicker(
+                photos: _photos,
+                video: _video,
+                busy: _preparingMedia,
+                videoBlocked: FeedRules.videoBlockedFor(_account),
+                onAddPhotos: _addPhotos,
+                onAddVideo: _addVideo,
+                onRemovePhoto: (i) => setState(() => _photos.removeAt(i)),
+                onRemoveVideo: () => setState(() => _video = null),
+              ),
+              const SizedBox(height: 16),
               DropdownButtonFormField<ReplyPolicy>(
                 initialValue: _draft.replyPolicy,
                 decoration: InputDecoration(
@@ -299,7 +461,151 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
               if (_posting) ...[
                 const SizedBox(height: 16),
                 const Center(child: CircularProgressIndicator()),
+                if (_progress != null) ...[
+                  const SizedBox(height: 8),
+                  Center(child: Text(_progress!, style: textTheme.bodySmall)),
+                ],
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Add-photos and add-video buttons, with removable previews.
+class _MediaPicker extends StatelessWidget {
+  const _MediaPicker({
+    required this.photos,
+    required this.video,
+    required this.busy,
+    required this.videoBlocked,
+    required this.onAddPhotos,
+    required this.onAddVideo,
+    required this.onRemovePhoto,
+    required this.onRemoveVideo,
+  });
+
+  final List<PreparedPhoto> photos;
+  final PreparedVideo? video;
+  final bool busy;
+  final String? videoBlocked;
+  final VoidCallback onAddPhotos;
+  final VoidCallback onAddVideo;
+  final ValueChanged<int> onRemovePhoto;
+  final VoidCallback onRemoveVideo;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final canAddPhotos =
+        !busy && video == null && photos.length < maxPhotosPerPost;
+    final canAddVideo =
+        !busy && video == null && photos.isEmpty && videoBlocked == null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: canAddPhotos ? onAddPhotos : null,
+              icon: const Icon(Icons.photo_library_outlined),
+              label: Text(photos.isEmpty
+                  ? 'Add photos'
+                  : 'Photos ${photos.length}/$maxPhotosPerPost'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: canAddVideo ? onAddVideo : null,
+              icon: const Icon(Icons.videocam_outlined),
+              label: const Text('Add video'),
+            ),
+            if (busy) ...[
+              const SizedBox(width: 12),
+              const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ],
+          ],
+        ),
+        Text(
+          'Up to $maxPhotosPerPost photos or one video '
+          '(${maxVideoDuration.inSeconds}s). Location data is removed.',
+          style: textTheme.bodySmall,
+        ),
+        if (videoBlocked != null)
+          Text(videoBlocked!, style: textTheme.bodySmall),
+        if (photos.isNotEmpty || video != null) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 88,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (var i = 0; i < photos.length; i++)
+                  _Thumb(
+                    image: Image.memory(
+                      Uint8List.fromList(photos[i].jpeg),
+                      fit: BoxFit.cover,
+                    ),
+                    onRemove: () => onRemovePhoto(i),
+                  ),
+                if (video case final v?)
+                  _Thumb(
+                    image: Image.file(File(v.thumbnailPath), fit: BoxFit.cover),
+                    isVideo: true,
+                    onRemove: onRemoveVideo,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _Thumb extends StatelessWidget {
+  const _Thumb({
+    required this.image,
+    required this.onRemove,
+    this.isVideo = false,
+  });
+
+  final Widget image;
+  final VoidCallback onRemove;
+  final bool isVideo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox.square(
+          dimension: 88,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              image,
+              if (isVideo)
+                const Center(
+                  child: Icon(Icons.play_circle, color: Colors.white, size: 32),
+                ),
+              Positioned(
+                top: 2,
+                right: 2,
+                child: IconButton.filledTonal(
+                  tooltip: 'Remove',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 16,
+                  onPressed: onRemove,
+                  icon: const Icon(Icons.close),
+                ),
+              ),
             ],
           ),
         ),

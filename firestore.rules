@@ -40,7 +40,8 @@ service cloud.firestore {
     function validProfile(data) {
       return data.keys().hasOnly(['role', 'name', 'sport', 'customSport',
           'level', 'category', 'topics', 'signUpMethod', 'dateOfBirth',
-          'adultFrom', 'athleteId', 'createdAt', 'consent'])
+          'adultFrom', 'athleteId', 'createdAt', 'consent', 'displayMode'])
+        && validEnum(data.get('displayMode', null), ['standard', 'easy'])
         && validPublicFields(data)
         && data.topics is list && data.topics.size() <= 4
         && data.dateOfBirth is timestamp
@@ -71,14 +72,14 @@ service cloud.firestore {
         && validProfile(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['name', 'sport', 'customSport', 'level', 'category',
-                       'topics']);
+                       'topics', 'displayMode']);
 
       // Private list of everything this member created, so deleting the
       // account can delete it all (PDPA: withdrawing consent).
       match /contributions/{contributionId} {
         allow get, list, delete: if signedIn() && request.auth.uid == uid;
         allow create: if signedIn() && request.auth.uid == uid
-          && request.resource.data.keys().hasOnly(['path'])
+          && request.resource.data.keys().hasOnly(['path', 'storage'])
           && request.resource.data.path is string;
       }
     }
@@ -149,6 +150,39 @@ service cloud.firestore {
         && d.authorCategory == p.category;
     }
 
+    function mediaOwnerPath(id) {
+      return /databases/$(database)/documents/mediaOwners/$(id);
+    }
+
+    // One attached photo or video, uploaded by this member.
+    function validMedia(m) {
+      return m.keys().hasOnly(['id', 'kind', 'width', 'height', 'durationMs'])
+        && m.kind in ['photo', 'video']
+        && m.width is int && m.height is int
+        && get(mediaOwnerPath(m.id)).data.uid == request.auth.uid
+        && get(mediaOwnerPath(m.id)).data.kind == m.kind;
+    }
+
+    // Up to 4 photos, or a single video.
+    function validMediaList(media) {
+      return media is list && media.size() <= 4
+        && (media.size() < 1 || validMedia(media[0]))
+        && (media.size() < 2 || validMedia(media[1]))
+        && (media.size() < 3 || validMedia(media[2]))
+        && (media.size() < 4 || validMedia(media[3]))
+        && (media.size() <= 1
+            || (media[0].kind == 'photo' && media[1].kind == 'photo'
+                && (media.size() < 3 || media[2].kind == 'photo')
+                && (media.size() < 4 || media[3].kind == 'photo')));
+    }
+
+    function canRespondTo(postId, p, minor) {
+      let target = get(postPath(postId)).data;
+      return target.replyPolicy != 'none'
+        && (target.replyPolicy == 'everyone' || p.role == 'athlete')
+        && (!target.minorAuthor || minor);
+    }
+
     function validNewPost(d) {
       let p = profile();
       let minor = isMinor(request.auth.uid);
@@ -156,7 +190,8 @@ service cloud.firestore {
           'authorRole', 'minorAuthor', 'replyPolicy', 'anonymous', 'answered',
           'replyCount', 'beenThereCount', 'authorUid', 'authorName',
           'authorSport', 'authorLevel', 'authorCategory', 'journeyId',
-          'journeyTitle'])
+          'journeyTitle', 'media', 'responseCount', 'respondsToId',
+          'respondsToText'])
         && d.type in ['experience', 'question']
         // General public members can only ask questions.
         && (p.role == 'athlete' || d.type == 'question')
@@ -170,6 +205,13 @@ service cloud.firestore {
         && d.replyPolicy in ['athletes', 'everyone', 'none']
         && d.anonymous is bool
         && d.answered == false && d.replyCount == 0 && d.beenThereCount == 0
+        && d.get('responseCount', 0) == 0
+        && validMediaList(d.get('media', []))
+        // A response post obeys the same rules as a reply to that post.
+        && (!d.keys().hasAny(['respondsToId'])
+            || (d.respondsToText is string
+                && d.respondsToText.size() <= 120
+                && canRespondTo(d.respondsToId, p, minor)))
         // Anonymous posts carry no author or journey fields at all.
         && (d.anonymous
               ? !d.keys().hasAny(['authorUid', 'authorName', 'authorSport',
@@ -186,7 +228,7 @@ service cloud.firestore {
       let minor = isMinor(request.auth.uid);
       return d.keys().hasOnly(['authorUid', 'authorName', 'authorSport',
           'authorLevel', 'authorCategory', 'authorRole', 'minorAuthor', 'text',
-          'createdAt', 'helpfulCount', 'helpedAsker'])
+          'createdAt', 'helpfulCount', 'helpedAsker', 'parentReplyId'])
         && authorMatches(d)
         && d.authorRole == p.role
         && d.minorAuthor == minor
@@ -198,7 +240,13 @@ service cloud.firestore {
         && (post.replyPolicy == 'everyone' || p.role == 'athlete')
         // Only under-18s reply to under-18 posts, until adult replies can
         // be reviewed by a moderator.
-        && (!post.minorAuthor || minor);
+        && (!post.minorAuthor || minor)
+        // A nested reply: the parent must exist, and adults can't reply to
+        // an under-18's reply either.
+        && (!d.keys().hasAny(['parentReplyId'])
+            || (exists(/databases/$(database)/documents/posts/$(postId)/replies/$(d.parentReplyId))
+                && (!get(/databases/$(database)/documents/posts/$(postId)/replies/$(d.parentReplyId)).data.minorAuthor
+                    || minor)));
     }
 
     // A counter moves by exactly one, together with the matching reaction.
@@ -225,6 +273,13 @@ service cloud.firestore {
             && request.resource.data.replyCount == resource.data.replyCount + 1
             && !exists(/databases/$(database)/documents/posts/$(postId)/replies/$(request.resource.data.lastReplyId))
             && existsAfter(/databases/$(database)/documents/posts/$(postId)/replies/$(request.resource.data.lastReplyId)))
+        // A response post: count +1 alongside a new post that responds here.
+        || (onlyChanged(['responseCount', 'lastResponseId'])
+            && request.resource.data.responseCount
+                 == resource.data.get('responseCount', 0) + 1
+            && !exists(postPath(request.resource.data.lastResponseId))
+            && getAfter(postPath(request.resource.data.lastResponseId))
+                 .data.respondsToId == postId)
         // The asker marks their question answered.
         || (onlyChanged(['answered'])
             && resource.data.type == 'question'
@@ -275,6 +330,21 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['uid'])
         && request.resource.data.uid == request.auth.uid
         && !exists(postPath(postId)) && existsAfter(postPath(postId));
+    }
+
+    // Private owner of each uploaded photo or video. Only the owner can read
+    // it, so media on anonymous posts can't be traced. The storage rules
+    // check it before allowing uploads and deletes.
+    match /mediaOwners/{mediaId} {
+      allow get, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'kind'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.kind in ['photo', 'video']
+        // Under-18 videos need moderator review first (not built yet).
+        && (request.resource.data.kind == 'photo'
+            || !isMinor(request.auth.uid));
     }
 
     match /journeys/{journeyId} {

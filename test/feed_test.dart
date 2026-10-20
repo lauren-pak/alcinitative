@@ -7,6 +7,7 @@ import 'package:athlete_app/models/sign_up_data.dart';
 import 'package:athlete_app/screens/feed/compose_post_screen.dart';
 import 'package:athlete_app/screens/feed/feed_screen.dart';
 import 'package:athlete_app/screens/feed/post_detail_screen.dart';
+import 'package:athlete_app/screens/home_shell.dart';
 import 'package:athlete_app/screens/your_data_screen.dart';
 import 'package:athlete_app/services/services.dart';
 
@@ -51,6 +52,10 @@ Future<Post> _post(Account author,
 }
 
 Future<void> _pump(WidgetTester tester, Widget screen) async {
+  // A phone-shaped window, so long post pages aren't cut off.
+  tester.view.physicalSize = const Size(800, 1800);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
   // A fresh key so switching viewer builds a new screen, not a reused one.
   await tester.pumpWidget(
       MaterialApp(home: KeyedSubtree(key: UniqueKey(), child: screen)));
@@ -65,6 +70,7 @@ void main() {
     Services.auth = auth;
     Services.profiles = profiles;
     Services.feed = feed;
+    Services.media = FakeMediaRepository();
   });
 
   group('FeedRules', () {
@@ -127,7 +133,7 @@ void main() {
     expect(find.text('No posts yet. Be the first to share.'), findsOneWidget);
 
     await _post(_account('a'), text: 'Fresh post after the feed loaded.');
-    await tester.fling(find.byType(ListView).first, const Offset(0, 400), 1000);
+    await tester.fling(find.byType(ListView).first, const Offset(0, 900), 1000);
     await tester.pumpAndSettle();
 
     expect(find.text('Fresh post after the feed loaded.'), findsOneWidget);
@@ -157,9 +163,16 @@ void main() {
 
   testWidgets('composing a post adds it to the feed', (tester) async {
     final me = _account('me');
-    await _pump(tester, FeedScreen(account: me));
+    await _pump(tester, HomeShell(account: me, isNewAccount: false));
 
+    // "New post" lives in the bottom navigation bar and opens the camera.
+    // Tests have no camera, so switch to a text post.
     await tester.tap(find.text('New post'));
+    await tester.pumpAndSettle();
+    expect(find.text('No camera found on this device.'), findsOneWidget);
+    await tester.tap(find.text('Text'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Write a post'));
     await tester.pumpAndSettle();
 
     // Posting without a topic is caught.
