@@ -2,11 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../../models/sign_up_data.dart';
 
+/// Sport, level, programme and topics. Also used to edit a saved profile.
 class ProfileStep extends StatefulWidget {
-  const ProfileStep({super.key, required this.data, required this.onContinue});
+  const ProfileStep({
+    super.key,
+    required this.data,
+    required this.onContinue,
+    this.submitLabel = 'Create account',
+    this.header,
+  });
 
   final SignUpData data;
   final VoidCallback onContinue;
+  final String submitLabel;
+
+  /// Shown above everything else, e.g. a name field when editing.
+  final Widget? header;
 
   @override
   State<ProfileStep> createState() => _ProfileStepState();
@@ -21,6 +32,10 @@ class _ProfileStepState extends State<ProfileStep> {
     final data = widget.data;
     if (_isAthlete && (data.sport == null || data.level == null)) {
       setState(() => _error = 'Choose your sport and level');
+      return;
+    }
+    if (_isAthlete && data.sport == otherSport && data.customSport.isEmpty) {
+      setState(() => _error = 'Type the name of your sport');
       return;
     }
     if (data.topics.isEmpty) {
@@ -41,6 +56,7 @@ class _ProfileStepState extends State<ProfileStep> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          ?widget.header,
           if (_isAthlete) ...[
             Text('Your sport', style: textTheme.headlineMedium),
             const SizedBox(height: 8),
@@ -65,6 +81,24 @@ class _ProfileStepState extends State<ProfileStep> {
                 _error = null;
               }),
             ),
+            if (data.sport == otherSport) ...[
+              const SizedBox(height: 16),
+              TextFormField(
+                initialValue: data.customSport,
+                autofocus: data.customSport.isEmpty,
+                decoration: const InputDecoration(
+                  labelText: 'Name of your sport',
+                  hintText: 'e.g. Fencing',
+                  border: OutlineInputBorder(),
+                ),
+                textCapitalization: TextCapitalization.words,
+                maxLength: 40,
+                onChanged: (v) => setState(() {
+                  data.customSport = v.trim();
+                  _error = null;
+                }),
+              ),
+            ],
             const SizedBox(height: 16),
             Text('Level', style: textTheme.titleMedium),
             const SizedBox(height: 8),
@@ -136,7 +170,7 @@ class _ProfileStepState extends State<ProfileStep> {
             Text(_error!, style: TextStyle(color: scheme.error)),
           ],
           const SizedBox(height: 24),
-          FilledButton(onPressed: _submit, child: const Text('Create account')),
+          FilledButton(onPressed: _submit, child: Text(widget.submitLabel)),
         ],
       ),
     );

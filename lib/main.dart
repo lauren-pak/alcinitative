@@ -1,8 +1,19 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
-import 'screens/intro_screen.dart';
+import 'firebase_options.dart';
+import 'screens/auth_gate.dart';
+import 'services/firebase_auth_service.dart';
+import 'services/firestore_profile_repository.dart';
+import 'services/services.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  final auth = FirebaseAuthService();
+  await auth.init();
+  Services.auth = auth;
+  Services.profiles = FirestoreProfileRepository();
   runApp(const AthleteApp());
 }
 
@@ -18,7 +29,7 @@ class AthleteApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFF00897B),
         useMaterial3: true,
       ),
-      home: const IntroScreen(),
+      home: const AuthGate(),
     );
   }
 }

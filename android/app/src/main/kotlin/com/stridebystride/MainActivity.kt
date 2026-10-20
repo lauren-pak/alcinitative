@@ -1,4 +1,4 @@
-package com.example.athlete_app
+package com.stridebystride
 
 import io.flutter.embedding.android.FlutterActivity
 

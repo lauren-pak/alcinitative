@@ -1,0 +1,107 @@
+rules_version = '2';
+
+// Athlete App security rules. These enforce the safeguarding and PDPA rules
+// on Google's servers; the app only mirrors them. Deploy with:
+//   npx -y firebase-tools@latest deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function cardPath(athleteId) {
+      return /databases/$(database)/documents/athleteIds/$(athleteId);
+    }
+
+    // Under 18 right now, based on the stored date they turn 18.
+    function isMinor(uid) {
+      return get(userPath(uid)).data.adultFrom > request.time;
+    }
+
+    function validEnum(value, allowed) {
+      return value == null || value in allowed;
+    }
+
+    // Fields shown on the ID card (no date of birth).
+    function validPublicFields(data) {
+      return data.role in ['athlete', 'public']
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 80
+        && (data.sport == null || (data.sport is string && data.sport.size() <= 40))
+        && data.customSport is string && data.customSport.size() <= 40
+        && validEnum(data.level, ['school', 'club', 'regional', 'national', 'elite'])
+        && validEnum(data.category, ['national', 'paralympic', 'specialOlympics']);
+    }
+
+    function validProfile(data) {
+      return data.keys().hasOnly(['role', 'name', 'sport', 'customSport',
+          'level', 'category', 'topics', 'signUpMethod', 'dateOfBirth',
+          'adultFrom', 'athleteId', 'createdAt', 'consent'])
+        && validPublicFields(data)
+        && data.topics is list && data.topics.size() <= 4
+        && data.dateOfBirth is timestamp
+        // 13 or older: under-13s need parental consent under the PDPA, so
+        // the app doesn't accept them.
+        && data.dateOfBirth < request.time - duration.value(4745, 'd')
+        // adultFrom must really be the 18th birthday (6574-6576 days later),
+        // so nobody can switch off under-18 protections early.
+        && data.adultFrom is timestamp
+        && data.adultFrom > data.dateOfBirth + duration.value(6573, 'd')
+        && data.adultFrom < data.dateOfBirth + duration.value(6577, 'd')
+        && data.athleteId is string;
+    }
+
+    // Private profile: only the owner can read or change it.
+    match /users/{uid} {
+      allow get, delete: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+
+      allow create: if signedIn() && request.auth.uid == uid
+        && validProfile(request.resource.data)
+        && request.resource.data.consent.version is string
+        && request.resource.data.consent.acceptedAt is timestamp
+        && getAfter(cardPath(request.resource.data.athleteId)).data.ownerUid == uid;
+
+      // Date of birth, athlete ID and the consent record can't be edited.
+      allow update: if signedIn() && request.auth.uid == uid
+        && validProfile(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['name', 'sport', 'customSport', 'level', 'category',
+                       'topics']);
+    }
+
+    // Public ID card, looked up only by exact ID: no listing or searching,
+    // so profiles aren't searchable (PDPC children's guidelines).
+    match /athleteIds/{athleteId} {
+      // Under-18 cards are only visible to their owner and other under-18s.
+      // Reading a missing ID is allowed so sign-up can check it's free.
+      allow get: if signedIn() && (
+        resource == null
+        || resource.data.ownerUid == request.auth.uid
+        || !isMinor(resource.data.ownerUid)
+        || isMinor(request.auth.uid));
+      allow list: if false;
+
+      // Created together with the owner's profile, once per member.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['ownerUid', 'role', 'name',
+             'sport', 'customSport', 'level', 'category', 'joinedAt'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && validPublicFields(request.resource.data)
+        && !exists(userPath(request.auth.uid))
+        && getAfter(userPath(request.auth.uid)).data.athleteId == athleteId;
+
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && validPublicFields(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['name', 'sport', 'customSport', 'level', 'category']);
+
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+  }
+}

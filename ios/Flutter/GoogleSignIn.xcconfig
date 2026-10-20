@@ -1,0 +1,5 @@
+// Google sign-in settings for iOS. See "Google sign-in setup" in CLAUDE.md.
+// Paste the REVERSED client ID from Google Cloud (starts with
+// com.googleusercontent.apps.) so Google can return to the app after sign-in.
+// The client ID itself goes in lib/config/google_sign_in_config.dart.
+GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.427340183202-d8bhvu6v2g7plt2ruf3a9anqndi339fr

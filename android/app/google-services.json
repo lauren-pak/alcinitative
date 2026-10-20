@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "427340183202",
+    "project_id": "stride-by-stride",
+    "storage_bucket": "stride-by-stride.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:427340183202:android:b677f7a3a5c0d09a6949fb",
+        "android_client_info": {
+          "package_name": "com.stridebystride"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "427340183202-e685gu6q1n9agcrc15m0s6s1oaolofa5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBX9jCGo8w051uJx_E6OwOAED20SBC4fRU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "427340183202-e685gu6q1n9agcrc15m0s6s1oaolofa5.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "427340183202-09088ljsogjifoqc2og3c6obgpsf0tvg.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.stridebystride"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'login_screen.dart';
 import 'sign_up/sign_up_flow.dart';
 
 /// First screen: explains what Athlete App is before sign-up.
@@ -69,6 +70,13 @@ class IntroScreen extends StatelessWidget {
                   MaterialPageRoute(builder: (_) => const SignUpFlow()),
                 ),
                 child: const Text('Get started'),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                ),
+                child: const Text('I already have an account'),
               ),
             ],
           ),
