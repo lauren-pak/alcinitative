@@ -12,8 +12,9 @@ import '../../widgets/minor_protections_notice.dart';
 import '../feed/post_detail_screen.dart';
 import '../find_athlete_screen.dart';
 import '../intro_screen.dart';
-import '../your_data_screen.dart';
+import '../moderation/moderation_screen.dart';
 import 'journey_screen.dart';
+import 'settings_screen.dart';
 
 /// How the member signs in, read from Firebase Auth (not stored in the
 /// profile).
@@ -50,6 +51,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late Future<List<Post>> _posts = Services.feed.postsBy(widget.account);
   late Future<List<Journey>> _journeys =
       Services.feed.myJourneys(widget.account);
+  late final Future<bool> _isModerator =
+      Services.safety.isModerator(widget.account.uid);
 
   Account get _account => widget.account;
 
@@ -80,23 +83,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
+  Future<void> _openSettings() => _open(SettingsScreen(account: _account));
 
-  Future<void> _setMode(DisplayMode mode) async {
-    final previous = _account.profile.displayMode;
-    _account.profile.displayMode = mode;
-    displayMode.value = mode;
-    try {
-      await Services.profiles.update(_account);
-    } catch (_) {
-      _account.profile.displayMode = previous;
-      displayMode.value = previous;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Couldn't save that. Check your connection."),
-        ));
-      }
-    }
-  }
 
   Future<void> _logOut() async {
     await Services.auth.signOut();
@@ -127,6 +115,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         title: const Text('Profile'),
         actions: [
+          IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: _openSettings,
+          ),
           TextButton(onPressed: _logOut, child: const Text('Log out')),
         ],
       ),
@@ -171,33 +164,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => _open(YourDataScreen(account: _account)),
-                    icon: const Icon(Icons.privacy_tip_outlined),
-                    label: const Text('Your data & privacy'),
-                  ),
-                  const SizedBox(height: 16),
-                  Text('How the app looks', style: textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  ValueListenableBuilder(
-                    valueListenable: displayMode,
-                    builder: (context, mode, _) => SegmentedButton<DisplayMode>(
-                      segments: const [
-                        ButtonSegment(
-                          value: DisplayMode.standard,
-                          icon: Icon(Icons.article_outlined),
-                          label: Text('Standard'),
-                        ),
-                        ButtonSegment(
-                          value: DisplayMode.easy,
-                          icon: Icon(Icons.text_increase),
-                          label: Text('Easy'),
-                        ),
-                      ],
-                      selected: {mode},
-                      onSelectionChanged: (s) => _setMode(s.first),
-                    ),
+                  FutureBuilder<bool>(
+                    future: _isModerator,
+                    builder: (context, snapshot) => snapshot.data == true
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: FilledButton.tonalIcon(
+                              onPressed: () => _open(const ModerationScreen()),
+                              icon: const Icon(Icons.gavel),
+                              label: const Text('Moderation'),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
                   ),
                   if (isMinor) ...[
                     const SizedBox(height: 8),
@@ -231,6 +209,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             if (_tab == _ProfileTab.posts) _postsList() else _journeysList(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: OutlinedButton.icon(
+                onPressed: _openSettings,
+                icon: const Icon(Icons.settings_outlined),
+                label: const Text('Settings'),
+              ),
+            ),
           ],
         ),
       ),

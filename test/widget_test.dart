@@ -61,12 +61,17 @@ SignUpData _profile({int age = 25, UserRole role = UserRole.athlete}) {
 }
 
 void main() {
+  late FakeSafetyRepository safety;
   setUp(() {
     auth = FakeAuthService();
     profiles = InMemoryProfileRepository(auth);
     Services.auth = auth;
     Services.profiles = profiles;
-    Services.feed = InMemoryFeedRepository();
+    final feed = InMemoryFeedRepository();
+    Services.feed = feed;
+    safety = FakeSafetyRepository(feed);
+    Services.safety = safety;
+    Services.moderation = FakeModerationRepository(feed, safety);
     Services.media = FakeMediaRepository();
   });
 
@@ -84,10 +89,14 @@ void main() {
 
     test('adultFromBirthDate is the 18th birthday', () {
       expect(
-          adultFromBirthDate(DateTime(2010, 6, 15)), DateTime.utc(2028, 6, 15));
+        adultFromBirthDate(DateTime(2010, 6, 15)),
+        DateTime.utc(2028, 6, 15),
+      );
       // Leap-day birthdays turn 18 on 1 March.
       expect(
-          adultFromBirthDate(DateTime(2008, 2, 29)), DateTime.utc(2026, 3, 1));
+        adultFromBirthDate(DateTime(2008, 2, 29)),
+        DateTime.utc(2026, 3, 1),
+      );
     });
   });
 
@@ -105,8 +114,9 @@ void main() {
     });
   });
 
-  testWidgets('roles stay disabled until the Privacy Notice is agreed',
-      (tester) async {
+  testWidgets('roles stay disabled until the Privacy Notice is agreed', (
+    tester,
+  ) async {
     await tester.pumpWidget(const AthleteApp());
     expect(find.text('Welcome to Athlete App'), findsOneWidget);
     await _tapVisible(tester, 'Get started');
@@ -129,8 +139,9 @@ void main() {
     expect(find.text('How do you want to sign up?'), findsOneWidget);
   });
 
-  testWidgets('email sign-up validates, then reports a taken email',
-      (tester) async {
+  testWidgets('email sign-up validates, then reports a taken email', (
+    tester,
+  ) async {
     await auth.signUpWithEmail('taken@example.com', 'password123');
     await auth.signOut();
     await _goToMethodStep(tester);
@@ -150,8 +161,7 @@ void main() {
     );
   });
 
-  testWidgets('phone sign-up checks the number, then the code',
-      (tester) async {
+  testWidgets('phone sign-up checks the number, then the code', (tester) async {
     await _goToMethodStep(tester);
     await _tapVisible(tester, 'Continue with phone number');
 
@@ -168,7 +178,9 @@ void main() {
     expect(find.text("That code isn't right. Try again."), findsOneWidget);
 
     await tester.enterText(
-        find.byType(TextFormField).last, FakeAuthService.validCode);
+      find.byType(TextFormField).last,
+      FakeAuthService.validCode,
+    );
     await _tapButton(tester, 'Verify');
     expect(find.text('About you'), findsOneWidget);
     expect(auth.currentUser?.phone, '+6591234567');
@@ -180,7 +192,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-        find.textContaining("isn't set up for this app yet"), findsOneWidget);
+      find.textContaining("isn't set up for this app yet"),
+      findsOneWidget,
+    );
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
     expect(find.text('How do you want to sign up?'), findsOneWidget);
@@ -211,8 +225,9 @@ void main() {
     expect(find.text('Enter your date of birth'), findsOneWidget);
   });
 
-  testWidgets('going back past the method step deletes the new sign-in',
-      (tester) async {
+  testWidgets('going back past the method step deletes the new sign-in', (
+    tester,
+  ) async {
     await _goToMethodStep(tester);
     await _signUpWithEmail(tester, 'leaving@example.com');
     expect(auth.currentUser, isNotNull);
@@ -227,11 +242,13 @@ void main() {
   testWidgets('public members only pick topics', (tester) async {
     var finished = false;
     final data = SignUpData()..role = UserRole.public;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: ProfileStep(data: data, onContinue: () => finished = true),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProfileStep(data: data, onContinue: () => finished = true),
+        ),
       ),
-    ));
+    );
 
     expect(find.text('Sport'), findsNothing);
     expect(find.text('Athlete programme'), findsNothing);
@@ -246,19 +263,22 @@ void main() {
     expect(finished, isTrue);
   });
 
-  testWidgets('athlete programme is optional; "Other" needs a sport name',
-      (tester) async {
+  testWidgets('athlete programme is optional; "Other" needs a sport name', (
+    tester,
+  ) async {
     var finished = false;
     final data = SignUpData()
       ..role = UserRole.athlete
       ..sport = otherSport
       ..level = CompetitionLevel.club
       ..topics.add(Topic.training);
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: ProfileStep(data: data, onContinue: () => finished = true),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProfileStep(data: data, onContinue: () => finished = true),
+        ),
       ),
-    ));
+    );
 
     // The "Name of your sport" box takes focus and scrolls the page, so let
     // that finish between taps.
@@ -313,8 +333,9 @@ void main() {
     expect(find.text('Finish signing up · 1 of 3'), findsOneWidget);
   });
 
-  testWidgets('profile shows the ID card without date of birth',
-      (tester) async {
+  testWidgets('profile shows the ID card without date of birth', (
+    tester,
+  ) async {
     final account = await profiles.create(
       'u1',
       _profile()
@@ -322,9 +343,9 @@ void main() {
         ..category = AthleteCategory.specialOlympics,
     );
 
-    await tester.pumpWidget(MaterialApp(
-      home: ProfileScreen(account: account, isNewAccount: true),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(home: ProfileScreen(account: account, isNewAccount: true)),
+    );
 
     expect(find.text('Welcome, Sam!'), findsOneWidget);
     expect(find.text('ATHLETE ID'), findsOneWidget);
@@ -338,23 +359,25 @@ void main() {
     Future<Account> pumpYourData(WidgetTester tester) async {
       final user = await auth.signUpWithEmail('sam@example.com', 'password123');
       final account = await profiles.create(
-          user.uid, _profile()..dateOfBirth = DateTime(1998, 3, 15));
-      await tester.pumpWidget(MaterialApp(
-        home: YourDataScreen(account: account),
-      ));
+        user.uid,
+        _profile()..dateOfBirth = DateTime(1998, 3, 15),
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: YourDataScreen(account: account)),
+      );
       return account;
     }
 
-    testWidgets('shows the member everything stored, including birth date',
-        (tester) async {
+    testWidgets('shows the member everything stored, including birth date', (
+      tester,
+    ) async {
       final account = await pumpYourData(tester);
       expect(find.text('03/15/1998'), findsOneWidget);
       expect(find.text(account.athleteId), findsOneWidget);
       expect(find.text('Email · sam@example.com'), findsOneWidget);
     });
 
-    testWidgets('deleting removes the profile and the sign-in',
-        (tester) async {
+    testWidgets('deleting removes the profile and the sign-in', (tester) async {
       await pumpYourData(tester);
       await _tapVisible(tester, 'Delete my account');
       await tester.pumpAndSettle();
@@ -371,19 +394,21 @@ void main() {
       expect(find.text('Welcome to Athlete App'), findsOneWidget);
     });
 
-    testWidgets('deleting needs a recent log-in and deletes nothing otherwise',
-        (tester) async {
-      auth.recentSignIn = false;
-      await pumpYourData(tester);
-      await _tapVisible(tester, 'Delete my account');
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'deleting needs a recent log-in and deletes nothing otherwise',
+      (tester) async {
+        auth.recentSignIn = false;
+        await pumpYourData(tester);
+        await _tapVisible(tester, 'Delete my account');
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+        await tester.pumpAndSettle();
 
-      expect(find.text('Please log in again'), findsOneWidget);
-      expect(profiles.accounts, hasLength(1));
-      expect(auth.deletedUsers, 0);
-    });
+        expect(find.text('Please log in again'), findsOneWidget);
+        expect(profiles.accounts, hasLength(1));
+        expect(auth.deletedUsers, 0);
+      },
+    );
   });
 
   test('adults cannot look up an under-18 athlete ID', () async {
@@ -396,8 +421,10 @@ void main() {
     expect(await profiles.findById(teen.athleteId), isNull);
     expect(await profiles.findById(adult.athleteId), adult);
 
-    auth.googleUser =
-        const AuthUser(uid: 'otherTeen', method: SignUpMethod.google);
+    auth.googleUser = const AuthUser(
+      uid: 'otherTeen',
+      method: SignUpMethod.google,
+    );
     await auth.signInWithGoogle();
     expect(await profiles.findById(teen.athleteId), teen);
   });

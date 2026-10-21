@@ -8,6 +8,7 @@ import 'services/firebase_auth_service.dart';
 import 'services/firebase_media_repository.dart';
 import 'services/firestore_feed_repository.dart';
 import 'services/firestore_profile_repository.dart';
+import 'services/firestore_safety_repository.dart';
 import 'services/services.dart';
 
 Future<void> main() async {
@@ -19,6 +20,8 @@ Future<void> main() async {
   Services.profiles = FirestoreProfileRepository();
   Services.feed = FirestoreFeedRepository();
   Services.media = FirebaseMediaRepository();
+  Services.safety = FirestoreSafetyRepository();
+  Services.moderation = FirestoreModerationRepository();
   runApp(const AthleteApp());
 }
 

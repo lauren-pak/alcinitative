@@ -10,11 +10,11 @@ import '../../widgets/media_widgets.dart';
 
 /// Plain-language topic names for Easy mode.
 String easyTopicLabel(Topic topic) => switch (topic) {
-      Topic.injury => 'Injuries',
-      Topic.training => 'Training',
-      Topic.nutrition => 'Food',
-      Topic.competition => 'Competing',
-    };
+  Topic.injury => 'Injuries',
+  Topic.training => 'Training',
+  Topic.nutrition => 'Food',
+  Topic.competition => 'Competing',
+};
 
 /// A big square picture button for a topic or a choice.
 class EasyTile extends StatelessWidget {
@@ -48,19 +48,23 @@ class EasyTile extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon,
-                    size: 48,
-                    color: selected ? scheme.onPrimary : scheme.onPrimaryContainer),
+                Icon(
+                  icon,
+                  size: 48,
+                  color: selected
+                      ? scheme.onPrimary
+                      : scheme.onPrimaryContainer,
+                ),
                 const SizedBox(height: 8),
                 Text(
                   label,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: selected
-                            ? scheme.onPrimary
-                            : scheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: selected
+                        ? scheme.onPrimary
+                        : scheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -73,7 +77,11 @@ class EasyTile extends StatelessWidget {
 
 /// A short, plain safety note with an icon.
 class EasyNote extends StatelessWidget {
-  const EasyNote({super.key, required this.text, this.icon = Icons.info_outline});
+  const EasyNote({
+    super.key,
+    required this.text,
+    this.icon = Icons.info_outline,
+  });
 
   final String text;
   final IconData icon;
@@ -92,11 +100,12 @@ class EasyNote extends StatelessWidget {
           Icon(icon, size: 28, color: scheme.onTertiaryContainer),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(text,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyLarge
-                    ?.copyWith(color: scheme.onTertiaryContainer)),
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: scheme.onTertiaryContainer,
+              ),
+            ),
           ),
         ],
       ),
@@ -106,11 +115,11 @@ class EasyNote extends StatelessWidget {
 
 /// The plain-language "not medical advice" note.
 EasyNote easyAdviceNote(Topic topic) => EasyNote(
-      text: topic == Topic.nutrition
-          ? 'This is someone\'s story. It is not advice from a doctor or '
-              'dietitian.'
-          : "This is someone's story. It is not advice from a doctor.",
-    );
+  text: topic == Topic.nutrition
+      ? 'This is someone\'s story. It is not advice from a doctor or '
+            'dietitian.'
+      : "This is someone's story. It is not advice from a doctor.",
+);
 
 /// The big "I need help" button for app bars.
 class EasyHelpButton extends StatelessWidget {
@@ -150,12 +159,16 @@ class EasyAvatar extends StatelessWidget {
       radius: 26,
       backgroundColor: scheme.secondaryContainer,
       child: anonymous
-          ? Icon(Icons.visibility_off_outlined, color: scheme.onSecondaryContainer)
-          : Text(initials,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(color: scheme.onSecondaryContainer)),
+          ? Icon(
+              Icons.visibility_off_outlined,
+              color: scheme.onSecondaryContainer,
+            )
+          : Text(
+              initials,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: scheme.onSecondaryContainer,
+              ),
+            ),
     );
   }
 }
@@ -203,10 +216,12 @@ class EasyPostCard extends StatelessWidget {
                     style: textTheme.titleSmall,
                   ),
                 ),
-              Text(post.text,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.bodyLarge),
+              Text(
+                post.text,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodyLarge,
+              ),
               if (post.media.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 MediaPreviewGrid(media: post.media.take(1).toList()),
@@ -214,13 +229,19 @@ class EasyPostCard extends StatelessWidget {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Text('👋 ${post.beenThereCount}', style: textTheme.titleMedium),
+                  Text(
+                    '👋 ${post.beenThereCount}',
+                    style: textTheme.titleMedium,
+                  ),
                   const SizedBox(width: 24),
                   Text('💬 ${post.commentCount}', style: textTheme.titleMedium),
                   const Spacer(),
-                  Text('Open ›',
-                      style: textTheme.titleMedium
-                          ?.copyWith(color: scheme.primary)),
+                  Text(
+                    'Open ›',
+                    style: textTheme.titleMedium?.copyWith(
+                      color: scheme.primary,
+                    ),
+                  ),
                 ],
               ),
             ],

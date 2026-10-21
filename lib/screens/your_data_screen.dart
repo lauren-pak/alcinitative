@@ -49,6 +49,11 @@ class _YourDataScreenState extends State<YourDataScreen> {
           .where(p.topics.contains)
           .map((t) => t.label)
           .join(', '),
+      'Muted topics': Topic.values
+          .where(p.mutedTopics.contains)
+          .map((t) => t.label)
+          .join(', '),
+      'Findable by name': p.findable ? 'On' : 'Off',
       'Athlete ID': _account.athleteId,
       'Joined': loc.formatCompactDate(_account.joinedAt),
       'Signed in with': signInSummary() ?? '',

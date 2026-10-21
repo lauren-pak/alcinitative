@@ -118,6 +118,19 @@ class SignUpData {
   /// Standard or Easy view. Private: only the member sees it.
   DisplayMode displayMode = DisplayMode.standard;
 
+  /// Topics hidden from this member's feed. Private.
+  final Set<Topic> mutedTopics = {};
+
+  /// Shown in Find athlete (name search and browsing by sport and
+  /// programme). Adult athletes only ([canBeFindableOn]): on by default for
+  /// them, and they can turn it off in Settings. Never for under-18s.
+  bool findable = true;
+
+  /// Only adult athletes can be found in search. Under-18s can still share
+  /// their athlete ID.
+  bool canBeFindableOn(DateTime now) =>
+      role == UserRole.athlete && !isMinorOn(now);
+
   /// The sport to display, using the typed-in name for "Other".
   String? get sportName => sport == otherSport ? customSport : sport;
 
@@ -137,5 +150,22 @@ class SignUpData {
     ..category = category
     ..topics.addAll(topics)
     ..consentGivenAt = consentGivenAt
-    ..displayMode = displayMode;
+    ..displayMode = displayMode
+    ..mutedTopics.addAll(mutedTopics)
+    ..findable = findable;
+
+  /// Copies the fields editable in Settings from [edited] (a [copy] that
+  /// was changed and saved), so every screen holding this profile sees them.
+  void applyEditsFrom(SignUpData edited) {
+    name = edited.name;
+    sport = edited.sport;
+    customSport = edited.customSport;
+    level = edited.level;
+    category = edited.category;
+    topics
+      ..clear()
+      ..addAll(edited.topics);
+    displayMode = edited.displayMode;
+    findable = edited.findable;
+  }
 }

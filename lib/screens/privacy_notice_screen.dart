@@ -45,6 +45,10 @@ class PrivacyNoticeScreen extends StatelessWidget {
                     'depending on how you sign in.',
                 'What you post: your posts, replies, journeys and '
                     'reactions like "Been there" and "Helpful".',
+                'Reports you make, the members you block, the topics you '
+                    'mute, and whether you show up in Find athlete.',
+                'Tags you add to your posts, and when you last edited a '
+                    'post.',
                 'Photos and videos you add to posts. We remove the '
                     'location and camera details hidden inside them before '
                     'they are uploaded.',
@@ -62,6 +66,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 'Your topics decide what shows up in your feed.',
                 'Your posts and replies are shared with other members, '
                     'because sharing experiences is what the app is for.',
+                'Moderators check reported posts and posts that might '
+                    'be unsafe, to keep everyone safe.',
                 "We never sell your information or use it for adverts.",
               ],
             ),
@@ -73,7 +79,15 @@ class PrivacyNoticeScreen extends StatelessWidget {
                     'month you joined.',
                 "If you're under 18, only other under-18s can see your "
                     'card, even if an adult has your ID.',
-                'Nobody can search for you or browse a list of members.',
+                'If you are an athlete aged 18 or over, members can find '
+                    'your ID card in "Find athlete" by searching your name '
+                    'or browsing by sport and programme. You can turn this '
+                    'off when you sign up, or any time in Settings → Safety '
+                    '& privacy ("Show me in Find athlete").',
+                'General public members and under-18s never show up in '
+                    'search or browsing.',
+                'Tags you add to a post can be searched by members, and '
+                    'lead to that post.',
                 'Your posts and replies can be seen by members who are '
                     'logged in, with your name and sport. Nobody outside '
                     'the app can see them.',
@@ -82,6 +96,10 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 'If you post anonymously, other members don\'t see your '
                     'name. Our moderators can still see who posted, to keep '
                     'everyone safe.',
+                'Moderators can see posts and replies waiting for a check, '
+                    'and the reports about them. The person you report is '
+                    "never told who reported them, and people you block "
+                    "aren't told.",
                 'Your date of birth, email and phone number are never '
                     'shown to other members.',
               ],
@@ -99,9 +117,12 @@ class PrivacyNoticeScreen extends StatelessWidget {
               title: 'How long we keep it',
               points: [
                 'For as long as you have an account.',
+                'You can delete any of your posts at any time. Its photos '
+                    'and videos are deleted too.',
                 'When you delete your account, we delete your profile, '
                     'your athlete ID, your posts, replies, reactions, '
-                    'photos and videos, and your sign-in details.',
+                    'reports, blocks, photos and videos, and your sign-in '
+                    'details.',
               ],
             ),
             const _Section(
@@ -120,8 +141,14 @@ class PrivacyNoticeScreen extends StatelessWidget {
               title: 'If you are under 18',
               points: [
                 'You need to be 13 or older to join.',
-                "Under-18s can add photos, but not videos yet. Videos "
-                    'will be checked by a moderator first.',
+                "Under-18s never show up in search or browsing. Other people "
+                    'can only find your card with the athlete ID you give '
+                    'them.',
+                'Videos and sports nutrition posts from under-18s are '
+                    'checked by a moderator before other members see them.',
+                'Only other under-18s can reply to your posts, unless you '
+                    'let adults reply. A moderator checks adult replies '
+                    'first.',
                 "If you're 13 to 17, only agree if you understand this "
                     'notice. If anything is unclear, read it with a parent '
                     'or guardian first.',

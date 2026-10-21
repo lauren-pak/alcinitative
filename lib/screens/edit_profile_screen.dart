@@ -4,8 +4,10 @@ import '../models/account.dart';
 import '../services/services.dart';
 import 'sign_up/profile_step.dart';
 
-/// Correct name, sport, level, programme and topics (PDPA correction).
-/// Pops with the updated [Account] when saved.
+/// Correct name, sport, level, programme, topics and who can find you
+/// (PDPA correction). Date of birth and athlete ID can't be changed here.
+/// On save, the edits are copied into the original account's profile, and
+/// it pops with the updated [Account].
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key, required this.account});
 
@@ -31,6 +33,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
     try {
       await Services.profiles.update(updated);
+      widget.account.profile.applyEditsFrom(_draft);
       if (mounted) Navigator.of(context).pop(updated);
     } catch (_) {
       if (!mounted) return;

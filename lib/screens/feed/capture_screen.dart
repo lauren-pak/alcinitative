@@ -65,14 +65,15 @@ class _CaptureScreenState extends State<CaptureScreen>
   int _seconds = 0;
   Timer? _timer;
 
-  String? get _videoBlocked => FeedRules.videoBlockedFor(widget.account);
+  /// Under-18s can record, but a moderator checks the video first.
+  String? get _videoNote => FeedRules.videoReviewNoteFor(widget.account);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Video first, unless videos aren't allowed yet (under-18s).
-    _mode = _videoBlocked == null ? CaptureMode.video : CaptureMode.photo;
+    // Video first, for everyone.
+    _mode = CaptureMode.video;
     _startCamera();
   }
 
@@ -495,13 +496,13 @@ class _CaptureScreenState extends State<CaptureScreen>
   }
 
   Widget _modeSwitcher() {
-    final blocked = _videoBlocked;
+    final note = _mode == CaptureMode.video ? _videoNote : null;
     return Column(
       children: [
-        if (blocked != null)
+        if (note != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(blocked,
+            child: Text(note,
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70, fontSize: 12)),
           ),
@@ -515,9 +516,7 @@ class _CaptureScreenState extends State<CaptureScreen>
                   avatar: Icon(mode.icon, size: 18),
                   label: Text(mode.label),
                   selected: _mode == mode,
-                  onSelected: mode == CaptureMode.video && blocked != null
-                      ? null
-                      : (_) => _setMode(mode),
+                  onSelected: (_) => _setMode(mode),
                 ),
               ),
           ],

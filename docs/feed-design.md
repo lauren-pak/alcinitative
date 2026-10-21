@@ -7,7 +7,8 @@ The feed is where athletes share sporting experiences and get advice from each o
 1. **Needs an answer:** open questions, newest first, in the topics the viewer picked. A question leaves this list once its asker marks a reply "This helped me".
 2. **Topic tabs:** Injury · Training · Sports nutrition · Competition, each with a picture icon. Members can mute a topic, which hides its tab and its posts.
 3. **Filters** (stage 3): by sport and by programme (National / Paralympic / Special Olympics).
-4. **Keyword search** (stage 3): post text only. It never searches people, so members stay unsearchable (PDPC children's guidelines).
+4. **Tag search** (built): posts can have up to 5 tags (`#acl`); the tag button in the feed, or tapping a tag, finds visible posts with it. Free-text keyword search is still stage 3.
+5. **Find athlete** (built): browse by sport and programme, or search by name. Adult athletes only, on by default with an opt-out in Settings. Under-18s stay unsearchable and are found only by the ID they share (PDPC children's guidelines).
 
 ## Posts
 
@@ -47,15 +48,15 @@ A post's comments are its replies plus its response posts.
 
 - **Topic banners** on every Injury and Sports nutrition post: *"Shared experience, not medical advice. See a doctor, physiotherapist or dietitian."*
 - **Help button** on every post, linking to support services (`lib/config/support_config.dart`). Verified 20 Oct 2026: Samaritans of Singapore 1767 (24h), National Mindline 1771 (24h), emergency 995. **Open:** a verified Singapore eating-disorder service.
-- **Flagged words** (stage 2): words such as "purging", "skip meals" or "cut weight fast" show the poster support links and hold the post for review.
-- **Under-18 Sports nutrition posts** are always reviewed before going live (stage 2). Until review exists, under-18s can't post in Sports nutrition.
-- **Moderation** (stage 2): automatic checks first, then a person approves anything uncertain on an in-app moderator screen. Under-18 videos always go to a person.
-- **Member tools** (stage 2): report a post or reply, block a member, mute a topic. A post is hidden automatically after several reports until a moderator checks it.
+- **Flagged words** (built): words such as "purging", "skip meals" or "cut weight fast" ask the writer "Are you okay?" with support links, and hold the post or reply for review. The list is `flaggedWordsPattern` (`lib/models/moderation.dart`) and the same regex in `flagged()` in `firestore.rules`.
+- **Held content** (built): a post or reply has `status` `visible`, `held` or `removed`. Held items are seen only by their writer (with a "waiting for a moderator" note) and moderators. The rules force `held` for flagged words, under-18 Sports nutrition posts, under-18 videos, and adult replies or response posts to under-18s.
+- **Moderation** (built): moderators are listed in `moderators/{uid}`, added by hand in the Firebase console. They get a Moderation button on their profile with Posts / Replies / Reports queues, and can approve, keep or remove. They can see who wrote anonymous posts. **Not built yet:** automatic checks of photos and videos (needs Blaze and Cloud Functions).
+- **Member tools** (built): report a post or reply (one report per member per item), block a member (hides their posts and replies, and stops them replying to yours), mute topics (Profile → Safety). The 3rd report hides an item until a moderator checks it.
 
 ## Adults and under-18s
 
 - Adults **can see** under-18 posts and react to them.
-- **Replies from adults to under-18 posts:** off by default; the young athlete can switch it on per post. Every adult reply is reviewed before it appears (stage 2). Until review exists, only under-18s can reply to under-18 posts.
+- **Replies from adults to under-18 posts:** off by default; the young athlete can switch it on per post ("Let adults reply"). Every adult reply, and every adult response post, is held for a moderator before it appears.
 - **No private messages** between adults and under-18s, ever.
 - **Following:** adults need the young athlete's approval to follow them or their journeys (stage 3).
 - When adult replies launch, update `MinorProtectionsNotice` and the Privacy Notice (both currently promise "only other under-18s can comment"), and bump `privacyNoticeVersion`.
@@ -89,6 +90,11 @@ Replies to my post, new posts in journeys I follow, questions I could answer (my
 | `posts/{postId}/beenThere/{uid}` | signed-in members | one doc per reaction (enforces one per person) |
 | `posts/{postId}/replies/{replyId}/helpful/{uid}` | signed-in members | one doc per Helpful mark |
 | `journeys/{journeyId}` | signed-in members | owner uid, title, createdAt (anonymous posts can't join journeys) |
+| `reports/{reportId}` | the reporter and moderators | `reporterUid`, `targetPath`, a copy of the text, `reason`, `details`, `status`. The ID is `targetPath` with `/` → `_`, then `__` and the reporter's uid, so each member reports an item once |
+| `users/{uid}/blocked/{otherUid}` | the owner only | `name`, `createdAt` |
+| `moderators/{uid}` | that moderator only | added by hand in the console |
+
+- Posts and replies also have `status`, `holdReason` and `reportCount`; posts have `adultRepliesAllowed`. Feed queries filter on `status == 'visible'` (the rules refuse queries that don't).
 
 - Counters (`replyCount`, `beenThereCount`, `helpfulCount`) change by exactly ±1 in the same batch as the matching document. `firestore.rules` checks that with `existsAfter`.
 - `minorAuthor` is set when the post is made and never changes, so a post written at 17 keeps its protections.
@@ -101,10 +107,10 @@ Navigation: the bottom bar is **Feed · New post · Profile** ("Home · Post · 
 - A **Video · Photo · Text** switch and a **Library** button cover other ways of posting.
 - In the standard view, the composer opens after capture with the media attached. A caption can be one word when there's media.
 - **Easy mode asks first:** topic → share or ask → *then* the camera (`CaptureScreen(returnMedia: true)`) → a few words → check and post. Closing the camera goes back a step, and "Record again" redoes the clip.
-- Under-18s start in Photo mode, with Video disabled until moderation exists.
+- Under-18s can record video too; a note says a moderator checks it first.
 - With no camera (the simulator, a denied permission, or no answer within 5 s), the screen offers Library and Text instead.
 
-1. **Text feed** (built): Experience and Question posts, journeys (create and tag), topic tabs with icons, Needs an answer, replies with poster controls, anonymous posting, Been there, Helpful plus disclaimer, This helped me, topic banners, help button. Public members ask questions only. Under-18s: replies from under-18s only, and no Sports nutrition posts yet.
-2. **Safety:** report, block, mute, auto-hide, flagged words, moderator role and screen, review queues (under-18 nutrition, adult replies to under-18s), automatic moderation. Needs a server function (Blaze plan) and a moderation service.
+1. **Text feed** (built): Experience and Question posts, journeys (create and tag), topic tabs with icons, Needs an answer, replies with poster controls, anonymous posting, Been there, Helpful plus disclaimer, This helped me, topic banners, help button. Public members ask questions only.
+2. **Safety** (built, except automatic moderation): report, block, mute, auto-hide after 3 reports, flagged words, moderator role and screen, review queues (under-18 nutrition and videos, adult replies to under-18s). **Still to do:** automatic photo/video checks and moderator notifications, which need Cloud Functions (Blaze plan).
 3. **Social:** other people's profiles, following, filters, search, in-app notifications. (Media, response posts, nested replies and the own profile were brought forward and are built.)
 4. **Accessibility and language:** easy-read mode, voice posts, read aloud, translations.

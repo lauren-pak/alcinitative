@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../../models/account.dart';
+import '../../models/moderation.dart';
 import '../../models/post.dart';
 import '../../services/services.dart';
 import '../../widgets/media_widgets.dart';
+import '../../widgets/safety_widgets.dart';
+import '../../widgets/tag_widgets.dart';
+import '../feed/edit_post_screen.dart';
+import '../feed/tag_search_screen.dart';
+import 'easy_compose_screen.dart';
 import 'easy_widgets.dart';
 
 /// A post in Easy mode: big text, "Me too", a simple list of replies, and a
@@ -45,13 +51,17 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
     try {
       final results = await Future.wait([
         feed.getPost(_post.id),
-        feed.replies(_post.id),
+        feed.replies(_post.id, viewer: widget.viewer),
         feed.responsesTo(_post.id),
         feed.hasBeenThere(_post.id, widget.viewer),
         feed.isMine(_post, widget.viewer),
+        Services.safety.blockedUids(widget.viewer),
       ]);
-      final replies = (results[1] as List<Reply>)
-        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final blocked = results[5] as Set<String>;
+      final replies = [
+        for (final r in results[1] as List<Reply>)
+          if (!blocked.contains(r.author.uid)) r,
+      ]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
       final helpful = await feed.myHelpful(_post.id, replies, widget.viewer);
       if (!mounted) return;
       setState(() {
@@ -84,43 +94,119 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
   }
 
   Future<void> _toggleMeToo() => _run(() async {
-        final on = !_meToo;
-        await Services.feed.setBeenThere(_post, widget.viewer, on);
-        setState(() {
-          _meToo = on;
-          _post = _post.copyWith(
-              beenThereCount: _post.beenThereCount + (on ? 1 : -1));
-        });
-      });
+    final on = !_meToo;
+    await Services.feed.setBeenThere(_post, widget.viewer, on);
+    setState(() {
+      _meToo = on;
+      _post = _post.copyWith(
+        beenThereCount: _post.beenThereCount + (on ? 1 : -1),
+      );
+    });
+  });
 
   Future<void> _toggleHelpful(Reply reply) => _run(() async {
-        final on = !_myHelpful.contains(reply.id);
-        await Services.feed.setHelpful(reply, widget.viewer, on);
-        setState(() {
-          on ? _myHelpful.add(reply.id) : _myHelpful.remove(reply.id);
-          _replies = [
-            for (final r in _replies!)
-              r.id == reply.id
-                  ? r.copyWith(helpfulCount: r.helpfulCount + (on ? 1 : -1))
-                  : r,
-          ];
-        });
-      });
+    final on = !_myHelpful.contains(reply.id);
+    await Services.feed.setHelpful(reply, widget.viewer, on);
+    setState(() {
+      on ? _myHelpful.add(reply.id) : _myHelpful.remove(reply.id);
+      _replies = [
+        for (final r in _replies!)
+          r.id == reply.id
+              ? r.copyWith(helpfulCount: r.helpfulCount + (on ? 1 : -1))
+              : r,
+      ];
+    });
+  });
 
   Future<void> _markHelped(Reply reply) => _run(() async {
-        await Services.feed.markHelpedAsker(_post, reply);
-        setState(() {
-          _post = _post.copyWith(answered: true);
-          _replies = [
-            for (final r in _replies!)
-              r.id == reply.id ? r.copyWith(helpedAsker: true) : r,
-          ];
-        });
-      });
+    await Services.feed.markHelpedAsker(_post, reply);
+    setState(() {
+      _post = _post.copyWith(answered: true);
+      _replies = [
+        for (final r in _replies!)
+          r.id == reply.id ? r.copyWith(helpedAsker: true) : r,
+      ];
+    });
+  });
+
+  Future<void> _report({Reply? reply}) => showReportSheet(
+    context,
+    what: reply == null ? 'this post' : 'this reply',
+    onReport: (reason, details) => reply == null
+        ? Services.safety.reportPost(
+            widget.viewer,
+            _post,
+            reason,
+            details: details,
+          )
+        : Services.safety.reportReply(
+            widget.viewer,
+            reply,
+            reason,
+            details: details,
+          ),
+  );
+
+  Future<void> _block(Author author) async {
+    if (!await confirmBlock(context, author.name)) return;
+    await _run(() async {
+      await Services.safety.block(widget.viewer, author);
+      if (!mounted) return;
+      if (_post.author?.uid == author.uid) {
+        Navigator.of(context).pop();
+      } else {
+        await _load();
+      }
+    });
+  }
+
+  Future<void> _answerWithPost() async {
+    final created = await Navigator.of(context).push<Post>(
+      MaterialPageRoute(
+        builder: (_) =>
+            EasyComposeScreen(account: widget.viewer, respondingTo: _post),
+      ),
+    );
+    if (created == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          created.isHeld
+              ? 'Thank you! A helper will check your post first.'
+              : 'Your post is up!',
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _edit() async {
+    final edited = await Navigator.of(context).push<Post>(
+      MaterialPageRoute(
+        builder: (_) => EditPostScreen(account: widget.viewer, post: _post),
+      ),
+    );
+    if (edited != null && mounted) setState(() => _post = edited);
+  }
+
+  Future<void> _delete() async {
+    if (!await confirmDeletePost(context, easy: true)) return;
+    await _run(() async {
+      await Services.feed.deletePost(widget.viewer, _post);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Your post is deleted.')));
+      Navigator.of(context).pop();
+    });
+  }
 
   Future<void> _send() async {
     final text = _replyText.text.trim();
     if (text.isEmpty) return;
+    if (containsFlaggedWords(text) && !await confirmFlaggedPost(context)) {
+      return;
+    }
     await _run(() async {
       final reply = await Services.feed.addReply(widget.viewer, _post, text);
       if (!mounted) return;
@@ -130,6 +216,13 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
         _replies = [...?_replies, reply];
         _post = _post.copyWith(replyCount: _post.replyCount + 1);
       });
+      if (reply.isHeld) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Thank you! A helper will check your reply first.'),
+          ),
+        );
+      }
     });
   }
 
@@ -151,11 +244,20 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (post.isHeld) ...[
+              const EasyNote(
+                text: 'A helper will check this before others can see it.',
+                icon: Icons.hourglass_top,
+              ),
+              const SizedBox(height: 12),
+            ],
             Row(
               children: [
                 EasyAvatar(name: post.authorName, anonymous: post.anonymous),
                 const SizedBox(width: 12),
-                Expanded(child: Text(post.authorName, style: textTheme.titleLarge)),
+                Expanded(
+                  child: Text(post.authorName, style: textTheme.titleLarge),
+                ),
               ],
             ),
             const SizedBox(height: 16),
@@ -163,6 +265,20 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
             if (post.media.isNotEmpty) ...[
               const SizedBox(height: 16),
               PostMediaView(media: post.media),
+            ],
+            if (post.tags.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              TagChips(
+                tags: post.tags,
+                onTap: (tag) => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => TagSearchScreen(
+                      account: widget.viewer,
+                      initialTag: tag,
+                    ),
+                  ),
+                ),
+              ),
             ],
             if (post.needsAdviceBanner) ...[
               const SizedBox(height: 16),
@@ -186,7 +302,8 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
             if (post.type == PostType.question) ...[
               const SizedBox(height: 8),
               const EasyNote(
-                text: '👍 means the answer helped someone. The person may not '
+                text:
+                    '👍 means the answer helped someone. The person may not '
                     'be a coach or doctor.',
               ),
             ],
@@ -199,33 +316,92 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
             else if (_replies!.isEmpty && _responses.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text('Nobody has replied yet.', style: textTheme.bodyLarge),
+                child: Text(
+                  'Nobody has replied yet.',
+                  style: textTheme.bodyLarge,
+                ),
               ),
             for (final reply in _replies ?? const <Reply>[])
               _EasyReply(
                 reply: reply,
+                onReport: reply.author.uid == widget.viewer.uid
+                    ? null
+                    : () => _report(reply: reply),
                 helpful: _myHelpful.contains(reply.id),
                 onHelpful: _busy ? null : () => _toggleHelpful(reply),
-                onHelpedMe:
-                    canMarkHelped && !_busy ? () => _markHelped(reply) : null,
+                onHelpedMe: canMarkHelped && !_busy
+                    ? () => _markHelped(reply)
+                    : null,
               ),
             for (final response in _responses)
               Card(
                 child: ListTile(
                   leading: const Icon(Icons.post_add, size: 32),
                   title: Text('${response.authorName} answered with a post'),
-                  subtitle: Text(response.text,
-                      maxLines: 2, overflow: TextOverflow.ellipsis),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) =>
-                        EasyPostScreen(post: response, viewer: widget.viewer),
-                  )),
+                  subtitle: Text(
+                    response.text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          EasyPostScreen(post: response, viewer: widget.viewer),
+                    ),
+                  ),
                 ),
               ),
             const SizedBox(height: 16),
+            if (_isMine) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _busy ? null : _edit,
+                  child: const Text('✏️ Change my post'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _busy ? null : _delete,
+                  child: const Text('🗑️ Delete my post'),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (!_isMine) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => _report(),
+                  child: const Text('🚩 Report a problem'),
+                ),
+              ),
+              if (post.author case final author?) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => _block(author),
+                    child: Text('🚫 Block ${author.name}'),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+            ],
             if (blocked != null)
               EasyNote(text: blocked, icon: Icons.lock_outline)
             else ...[
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: _busy ? null : _answerWithPost,
+                  icon: const Icon(Icons.videocam_outlined),
+                  label: const Text('Answer with a video or post'),
+                ),
+              ),
+              const SizedBox(height: 16),
               TextField(
                 controller: _replyText,
                 minLines: 2,
@@ -257,12 +433,14 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
 class _EasyReply extends StatelessWidget {
   const _EasyReply({
     required this.reply,
+    required this.onReport,
     required this.helpful,
     required this.onHelpful,
     required this.onHelpedMe,
   });
 
   final Reply reply;
+  final VoidCallback? onReport;
   final bool helpful;
   final VoidCallback? onHelpful;
   final VoidCallback? onHelpedMe;
@@ -283,13 +461,20 @@ class _EasyReply extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (reply.isHeld)
+            Text(
+              '⏳ A helper will check this first.',
+              style: textTheme.titleSmall,
+            ),
           if (reply.helpedAsker)
             Text('✅ This helped', style: textTheme.titleSmall),
           Row(
             children: [
               EasyAvatar(name: reply.author.name),
               const SizedBox(width: 12),
-              Expanded(child: Text(reply.author.name, style: textTheme.titleMedium)),
+              Expanded(
+                child: Text(reply.author.name, style: textTheme.titleMedium),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -308,6 +493,8 @@ class _EasyReply extends StatelessWidget {
                   onPressed: onHelpedMe,
                   child: const Text('✅ This helped me'),
                 ),
+              if (onReport != null)
+                TextButton(onPressed: onReport, child: const Text('🚩 Report')),
             ],
           ),
         ],

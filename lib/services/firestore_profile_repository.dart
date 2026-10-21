@@ -35,7 +35,12 @@ class FirestoreProfileRepository implements ProfileRepository {
       ..consentGivenAt =
           (data['consent']?['acceptedAt'] as Timestamp?)?.toDate()
       ..displayMode =
-          _enum(DisplayMode.values, data['displayMode']) ?? DisplayMode.standard;
+          _enum(DisplayMode.values, data['displayMode']) ?? DisplayMode.standard
+      ..findable = data['findable'] as bool? ?? false;
+    for (final name in (data['mutedTopics'] as List?) ?? const []) {
+      final topic = _enum(Topic.values, name);
+      if (topic != null) profile.mutedTopics.add(topic);
+    }
     return Account(
       uid: uid,
       athleteId: data['athleteId'] as String,
@@ -48,6 +53,8 @@ class FirestoreProfileRepository implements ProfileRepository {
   Future<Account> create(String uid, SignUpData profile) async {
     final dob = profile.dateOfBirth!;
     final dobUtc = DateTime.utc(dob.year, dob.month, dob.day);
+    final findable =
+        profile.findable && profile.canBeFindableOn(DateTime.now());
     for (var attempt = 0; attempt < 5; attempt++) {
       final athleteId = newAthleteId();
       final created = await _db.runTransaction<bool>((tx) async {
@@ -56,10 +63,13 @@ class FirestoreProfileRepository implements ProfileRepository {
         tx.set(card, {
           'ownerUid': uid,
           ..._publicFields(profile),
+          'findable': findable,
+          'searchKeys': findable ? nameSearchKeys(profile.name) : <String>[],
           'joinedAt': FieldValue.serverTimestamp(),
         });
         tx.set(_users.doc(uid), {
           ..._publicFields(profile),
+          'findable': findable,
           'topics': [for (final t in profile.topics) t.name],
           'displayMode': profile.displayMode.name,
           'signUpMethod': profile.method?.name,
@@ -77,6 +87,7 @@ class FirestoreProfileRepository implements ProfileRepository {
         return true;
       });
       if (created) {
+        profile.findable = findable;
         return Account(
           uid: uid,
           athleteId: athleteId,
@@ -91,13 +102,22 @@ class FirestoreProfileRepository implements ProfileRepository {
   @override
   Future<void> update(Account account) async {
     final profile = account.profile;
+    final findable =
+        profile.findable && profile.canBeFindableOn(DateTime.now());
     final batch = _db.batch()
       ..update(_users.doc(account.uid), {
         ..._publicFields(profile),
         'topics': [for (final t in profile.topics) t.name],
         'displayMode': profile.displayMode.name,
+        'mutedTopics': [for (final t in profile.mutedTopics) t.name],
+        'findable': findable,
       })
-      ..update(_cards.doc(account.athleteId), _publicFields(profile));
+      ..update(_cards.doc(account.athleteId), {
+        ..._publicFields(profile),
+        'findable': findable,
+        // Only stored while findable (data minimisation).
+        'searchKeys': findable ? nameSearchKeys(profile.name) : <String>[],
+      });
     await batch.commit();
   }
 
@@ -121,6 +141,44 @@ class FirestoreProfileRepository implements ProfileRepository {
       joinedAt: _date(data['joinedAt']),
     );
   }
+
+  @override
+  Future<List<Account>> searchByName(String query) async {
+    final words = searchWords(query);
+    if (words.isEmpty) return [];
+    // The rules only allow listing cards that opted in.
+    final snapshot = await _cards
+        .where('findable', isEqualTo: true)
+        .where('searchKeys', arrayContains: words.first)
+        .limit(20)
+        .get();
+    return [
+      for (final doc in snapshot.docs)
+        if (matchesName(doc.data()['name'] as String? ?? '', words))
+          _cardFrom(doc),
+    ];
+  }
+
+  @override
+  Future<List<Account>> browse({String? sport, AthleteCategory? category}) async {
+    // The rules only allow listing cards that are findable.
+    var query = _cards.where('findable', isEqualTo: true);
+    if (sport != null) query = query.where('sport', isEqualTo: sport);
+    if (category != null) {
+      query = query.where('category', isEqualTo: category.name);
+    }
+    final snapshot = await query.limit(50).get();
+    return [for (final doc in snapshot.docs) _cardFrom(doc)]
+      ..sort((a, b) => a.profile.name.compareTo(b.profile.name));
+  }
+
+  Account _cardFrom(QueryDocumentSnapshot<Map<String, dynamic>> doc) =>
+      Account(
+        uid: doc.data()['ownerUid'] as String,
+        athleteId: doc.id,
+        profile: _profileFrom(doc.data()),
+        joinedAt: _date(doc.data()['joinedAt']),
+      );
 
   @override
   Future<void> delete(Account account) async {

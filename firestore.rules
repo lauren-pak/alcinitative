@@ -40,7 +40,10 @@ service cloud.firestore {
     function validProfile(data) {
       return data.keys().hasOnly(['role', 'name', 'sport', 'customSport',
           'level', 'category', 'topics', 'signUpMethod', 'dateOfBirth',
-          'adultFrom', 'athleteId', 'createdAt', 'consent', 'displayMode'])
+          'adultFrom', 'athleteId', 'createdAt', 'consent', 'displayMode',
+          'mutedTopics', 'findable'])
+        && data.get('mutedTopics', []) is list
+        && data.get('findable', false) is bool
         && validEnum(data.get('displayMode', null), ['standard', 'easy'])
         && validPublicFields(data)
         && data.topics is list && data.topics.size() <= 4
@@ -72,7 +75,16 @@ service cloud.firestore {
         && validProfile(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['name', 'sport', 'customSport', 'level', 'category',
-                       'topics', 'displayMode']);
+                       'topics', 'displayMode', 'mutedTopics', 'findable']);
+
+      // Members this person blocked. Private; the feed rules also check it
+      // so blocked members can't reply to this person's posts.
+      match /blocked/{otherUid} {
+        allow get, list, delete: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid
+          && otherUid != uid
+          && request.resource.data.keys().hasOnly(['name', 'createdAt']);
+      }
 
       // Private list of everything this member created, so deleting the
       // account can delete it all (PDPA: withdrawing consent).
@@ -84,8 +96,23 @@ service cloud.firestore {
       }
     }
 
-    // Public ID card, looked up only by exact ID: no listing or searching,
-    // so profiles aren't searchable (PDPC children's guidelines).
+    // Public ID card, looked up by exact ID. Only adult athletes who opted in
+    // ('findable') can be found by name; under-18s never can (PDPC
+    // children's guidelines).
+
+    // Name search: opt-in, adult athletes only, and the search keys are
+    // only stored while it's on.
+    // [minor]: whether the writer is under 18 (on create, the profile is
+    // written in the same transaction, so it's read with getAfter).
+    function validFindable(d, minor) {
+      let findable = d.get('findable', false);
+      let keys = d.get('searchKeys', []);
+      return findable is bool && keys is list && keys.size() <= 60
+        && (findable
+            ? d.role == 'athlete' && !minor
+            : keys.size() == 0);
+    }
+
     match /athleteIds/{athleteId} {
       // Under-18 cards are only visible to their owner and other under-18s.
       // Reading a missing ID is allowed so sign-up can check it's free.
@@ -94,22 +121,28 @@ service cloud.firestore {
         || resource.data.ownerUid == request.auth.uid
         || !isMinor(resource.data.ownerUid)
         || isMinor(request.auth.uid));
-      allow list: if false;
+      // Search queries must ask for findable cards only.
+      allow list: if signedIn() && resource.data.findable == true;
 
       // Created together with the owner's profile, once per member.
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['ownerUid', 'role', 'name',
-             'sport', 'customSport', 'level', 'category', 'joinedAt'])
+             'sport', 'customSport', 'level', 'category', 'joinedAt',
+             'findable', 'searchKeys'])
         && request.resource.data.ownerUid == request.auth.uid
         && validPublicFields(request.resource.data)
+        && validFindable(request.resource.data,
+             getAfter(userPath(request.auth.uid)).data.adultFrom > request.time)
         && !exists(userPath(request.auth.uid))
         && getAfter(userPath(request.auth.uid)).data.athleteId == athleteId;
 
       allow update: if signedIn()
         && resource.data.ownerUid == request.auth.uid
         && validPublicFields(request.resource.data)
+        && validFindable(request.resource.data, isMinor(request.auth.uid))
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['name', 'sport', 'customSport', 'level', 'category']);
+             .hasOnly(['name', 'sport', 'customSport', 'level', 'category',
+                       'findable', 'searchKeys']);
 
       allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
     }
@@ -176,11 +209,100 @@ service cloud.firestore {
                 && (media.size() < 4 || media[3].kind == 'photo')));
     }
 
+    // ----- Moderation (stage 2). Mirrored in lib/models/moderation.dart.
+
+    // Listed in moderators/{uid}, added by hand in the Firebase console.
+    function isModerator() {
+      return signedIn() && exists(/databases/$(database)/documents/moderators/$(request.auth.uid));
+    }
+
+    // Words suggesting someone is struggling or giving dangerous advice.
+    // MUST match flaggedWordsPattern in lib/models/moderation.dart.
+    function flagged(text) {
+      return text.lower().matches('(?s).*(purg|starv|laxative|diet pill|skip(ping)? meals|not eating|stop(ped)? eating|throw(ing)? up|make myself sick|cut(ting)? weight fast|weight cut|self.?harm|cutting myself|hurt myself|kill myself|suicid|want to die|end it all).*');
+    }
+
+    // New content is 'visible' or 'held'; it must be 'held' when [mustHold].
+    function validStatus(d, mustHold) {
+      return d.status in ['visible', 'held']
+        && (d.status == 'held' || !mustHold)
+        && (d.status == 'visible' || d.holdReason is string)
+        && d.reportCount == 0;
+    }
+
+    // Up to 5 tags: lowercase letters and numbers, 2-20 long (normaliseTag).
+    function validTag(t) {
+      return t is string && t.matches('[a-z0-9]{2,20}');
+    }
+
+    function validTags(tags) {
+      return tags is list && tags.size() <= 5
+        && (tags.size() < 1 || validTag(tags[0]))
+        && (tags.size() < 2 || validTag(tags[1]))
+        && (tags.size() < 3 || validTag(tags[2]))
+        && (tags.size() < 4 || validTag(tags[3]))
+        && (tags.size() < 5 || validTag(tags[4]));
+    }
+
+    // Flagged words in a post's text or its tags.
+    function postFlagged(d) {
+      return flagged(d.text + ' ' + d.get('tags', []).join(' '));
+    }
+
+    // The author changes the text or tags. Adding flagged words sends a
+    // visible post back for review; otherwise the status can't change.
+    function validEdit(postId) {
+      let d = request.resource.data;
+      let oldStatus = resource.data.get('status', 'visible');
+      let newStatus = d.get('status', 'visible');
+      return isPostAuthor(postId)
+        && onlyChanged(['text', 'tags', 'editedAt', 'status', 'holdReason'])
+        && d.text is string && d.text.size() > 0 && d.text.size() <= 2000
+        && validTags(d.get('tags', []))
+        && d.editedAt == request.time
+        && ((newStatus == oldStatus
+              && d.get('holdReason', null) == resource.data.get('holdReason', null))
+            || (oldStatus == 'visible' && newStatus == 'held'
+                && d.holdReason == 'flaggedWords'))
+        && (newStatus != 'visible' || !postFlagged(d));
+    }
+
+    function hasVideo(media) {
+      return media.size() > 0 && media[0].kind == 'video';
+    }
+
+    // Has the owner of [postId] blocked the requester?
+    function blockedByPostOwner(postId) {
+      let owner = get(authorLinkPath(postId)).data.uid;
+      return exists(/databases/$(database)/documents/users/$(owner)/blocked/$(request.auth.uid));
+    }
+
+    // A report raises the count by one alongside the reporter's new report,
+    // and the 3rd report hides it for review.
+    function reportCounted(reportPath) {
+      let before = resource.data.get('reportCount', 0);
+      let after = request.resource.data.reportCount;
+      let oldStatus = resource.data.get('status', 'visible');
+      let newStatus = request.resource.data.get('status', 'visible');
+      return onlyChanged(['reportCount', 'status', 'holdReason'])
+        && after == before + 1
+        && !exists(reportPath) && existsAfter(reportPath)
+        && (newStatus == oldStatus
+            || (oldStatus == 'visible' && newStatus == 'held' && after >= 3
+                && request.resource.data.holdReason == 'reports'));
+    }
+
+    function moderatorStatusChange() {
+      return isModerator()
+        && onlyChanged(['status', 'holdReason'])
+        && request.resource.data.status in ['visible', 'held', 'removed'];
+    }
+
     function canRespondTo(postId, p, minor) {
       let target = get(postPath(postId)).data;
       return target.replyPolicy != 'none'
         && (target.replyPolicy == 'everyone' || p.role == 'athlete')
-        && (!target.minorAuthor || minor);
+        && (!target.minorAuthor || minor || target.get('adultRepliesAllowed', false));
     }
 
     function validNewPost(d) {
@@ -191,13 +313,21 @@ service cloud.firestore {
           'replyCount', 'beenThereCount', 'authorUid', 'authorName',
           'authorSport', 'authorLevel', 'authorCategory', 'journeyId',
           'journeyTitle', 'media', 'responseCount', 'respondsToId',
-          'respondsToText'])
+          'respondsToText', 'status', 'holdReason', 'reportCount',
+          'adultRepliesAllowed', 'tags'])
+        && validTags(d.get('tags', []))
         && d.type in ['experience', 'question']
         // General public members can only ask questions.
         && (p.role == 'athlete' || d.type == 'question')
         && d.topic in ['injury', 'training', 'nutrition', 'competition']
-        // Under-18 nutrition posts need moderator review (not built yet).
-        && !(minor && d.topic == 'nutrition')
+        // Held for a moderator: flagged words; under-18 nutrition posts and
+        // videos; adults responding to an under-18 who allowed adult replies.
+        && validStatus(d, postFlagged(d)
+             || (minor && (d.topic == 'nutrition' || hasVideo(d.get('media', []))))
+             || (d.keys().hasAny(['respondsToId']) && !minor
+                 && get(postPath(d.respondsToId)).data.minorAuthor))
+        // Only under-18s can open their posts to adult replies.
+        && d.adultRepliesAllowed is bool && (!d.adultRepliesAllowed || minor)
         && d.text is string && d.text.size() > 0 && d.text.size() <= 2000
         && d.createdAt == request.time
         && d.authorRole == p.role
@@ -228,7 +358,8 @@ service cloud.firestore {
       let minor = isMinor(request.auth.uid);
       return d.keys().hasOnly(['authorUid', 'authorName', 'authorSport',
           'authorLevel', 'authorCategory', 'authorRole', 'minorAuthor', 'text',
-          'createdAt', 'helpfulCount', 'helpedAsker', 'parentReplyId'])
+          'createdAt', 'helpfulCount', 'helpedAsker', 'parentReplyId',
+          'status', 'holdReason', 'reportCount'])
         && authorMatches(d)
         && d.authorRole == p.role
         && d.minorAuthor == minor
@@ -238,9 +369,12 @@ service cloud.firestore {
         // The poster's choice of who may reply.
         && post.replyPolicy != 'none'
         && (post.replyPolicy == 'everyone' || p.role == 'athlete')
-        // Only under-18s reply to under-18 posts, until adult replies can
-        // be reviewed by a moderator.
-        && (!post.minorAuthor || minor)
+        // Adults reply to under-18 posts only if the poster allowed it, and
+        // those replies wait for a moderator. Flagged words wait too.
+        && (!post.minorAuthor || minor || post.get('adultRepliesAllowed', false))
+        && validStatus(d, flagged(d.text) || (post.minorAuthor && !minor))
+        // Someone the post's author blocked can't reply.
+        && !blockedByPostOwner(postId)
         // A nested reply: the parent must exist, and adults can't reply to
         // an under-18's reply either.
         && (!d.keys().hasAny(['parentReplyId'])
@@ -259,8 +393,14 @@ service cloud.firestore {
     }
 
     match /posts/{postId} {
-      // Members only, never public. Listing is allowed for the feed.
-      allow get, list: if signedIn();
+      // Members only, never public. Feed queries must ask for visible posts
+      // only; held posts are seen by their author and moderators.
+      // Reading a deleted post just finds nothing.
+      allow get: if signedIn() && (resource == null
+        || resource.data.get('status', 'visible') == 'visible'
+        || isModerator() || isPostAuthor(postId));
+      allow list: if signedIn()
+        && (resource.data.status == 'visible' || isModerator());
 
       allow create: if signedIn() && validNewPost(request.resource.data)
         && getAfter(authorLinkPath(postId)).data.uid == request.auth.uid;
@@ -285,12 +425,22 @@ service cloud.firestore {
             && resource.data.type == 'question'
             && resource.data.answered == false
             && request.resource.data.answered == true
-            && isPostAuthor(postId)));
+            && isPostAuthor(postId))
+        || reportCounted(/databases/$(database)/documents/reports/$('posts_' + postId + '__' + request.auth.uid))
+        || moderatorStatusChange()
+        || validEdit(postId));
 
-      allow delete: if signedIn() && isPostAuthor(postId);
+      // Deleting something already gone is harmless (account deletion may
+      // revisit a post deleted earlier).
+      allow delete: if signedIn() && (resource == null || isPostAuthor(postId));
 
       match /replies/{replyId} {
-        allow get, list: if signedIn();
+        allow get: if signedIn() && (
+          resource.data.get('status', 'visible') == 'visible'
+          || resource.data.authorUid == request.auth.uid || isModerator());
+        allow list: if signedIn() && (
+          resource.data.status == 'visible'
+          || resource.data.authorUid == request.auth.uid || isModerator());
         allow create: if signedIn() && validReply(postId, request.resource.data)
           && getAfter(postPath(postId)).data.lastReplyId == replyId;
         allow update: if signedIn() && (
@@ -302,8 +452,11 @@ service cloud.firestore {
               && request.resource.data.helpedAsker == true
               && isPostAuthor(postId)
               && get(postPath(postId)).data.answered == false
-              && getAfter(postPath(postId)).data.answered == true));
-        allow delete: if signedIn() && resource.data.authorUid == request.auth.uid;
+              && getAfter(postPath(postId)).data.answered == true)
+          || reportCounted(/databases/$(database)/documents/reports/$('posts_' + postId + '_replies_' + replyId + '__' + request.auth.uid))
+          || moderatorStatusChange());
+        allow delete: if signedIn()
+          && (resource == null || resource.data.authorUid == request.auth.uid);
 
         match /helpful/{uid} {
           allow get, delete: if signedIn() && request.auth.uid == uid;
@@ -324,7 +477,10 @@ service cloud.firestore {
     // Private link from a post to its author. Only the author can read it,
     // so anonymous posts stay anonymous to everyone else.
     match /postAuthors/{postId} {
-      allow get, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow get: if signedIn()
+        && (resource.data.uid == request.auth.uid || isModerator());
+      allow delete: if signedIn()
+        && (resource == null || resource.data.uid == request.auth.uid);
       allow list: if false;
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['uid'])
@@ -336,15 +492,53 @@ service cloud.firestore {
     // it, so media on anonymous posts can't be traced. The storage rules
     // check it before allowing uploads and deletes.
     match /mediaOwners/{mediaId} {
-      allow get, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow get: if signedIn() && resource.data.uid == request.auth.uid;
+      allow delete: if signedIn()
+        && (resource == null || resource.data.uid == request.auth.uid);
       allow list: if false;
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['uid', 'kind'])
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.kind in ['photo', 'video']
-        // Under-18 videos need moderator review first (not built yet).
-        && (request.resource.data.kind == 'photo'
-            || !isMinor(request.auth.uid));
+        // Under-18 videos are allowed; their posts are held for review.
+        && request.resource.data.kind in ['photo', 'video'];
+    }
+
+    // Moderators query held replies across all posts.
+    match /{path=**}/replies/{replyId} {
+      allow list: if isModerator();
+    }
+
+    // Who moderates. Managed by hand in the Firebase console; members can
+    // only check their own entry.
+    match /moderators/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, write: if false;
+    }
+
+    // One report per member per item; the ID encodes both (see reportId()).
+    match /reports/{reportId} {
+      // Reading a missing report is allowed so the app can check for a
+      // duplicate before reporting.
+      allow get: if signedIn() && (resource == null
+        || resource.data.reporterUid == request.auth.uid || isModerator());
+      allow list: if isModerator();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['reporterUid', 'targetPath',
+             'targetText', 'reason', 'details', 'status', 'createdAt'])
+        && request.resource.data.reporterUid == request.auth.uid
+        && reportId == request.resource.data.targetPath.replace('/', '_')
+             + '__' + request.auth.uid
+        && request.resource.data.reason in ['bullying', 'unsafeAdvice',
+             'inappropriate', 'wellbeing', 'spam', 'other']
+        && request.resource.data.details.size() <= 500
+        && request.resource.data.targetText.size() <= 500
+        && request.resource.data.status == 'open'
+        && request.resource.data.createdAt == request.time;
+      allow update: if isModerator()
+        && onlyChanged(['status', 'action', 'resolvedAt']);
+      // Deleting an account deletes its reports.
+      allow delete: if signedIn()
+        && (resource == null || resource.data.reporterUid == request.auth.uid);
     }
 
     match /journeys/{journeyId} {

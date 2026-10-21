@@ -6,6 +6,7 @@ import 'package:image/image.dart' as img;
 
 import 'package:athlete_app/models/account.dart';
 import 'package:athlete_app/models/media.dart';
+import 'package:athlete_app/models/moderation.dart';
 import 'package:athlete_app/models/post.dart';
 import 'package:athlete_app/models/sign_up_data.dart';
 import 'package:athlete_app/screens/feed/capture_screen.dart';
@@ -38,11 +39,13 @@ Account _account(String uid, {String name = 'Sam Taylor', int age = 25}) {
   );
 }
 
-Future<Post> _post(Account author,
-    {String text = 'Tapering for my first national meet.',
-    bool anonymous = false,
-    Journey? journey,
-    List<MediaItem> withMedia = const []}) {
+Future<Post> _post(
+  Account author, {
+  String text = 'Tapering for my first national meet.',
+  bool anonymous = false,
+  Journey? journey,
+  List<MediaItem> withMedia = const [],
+}) {
   return feed.createPost(
     author,
     NewPost()
@@ -60,7 +63,10 @@ Future<void> _pump(WidgetTester tester, Widget screen) async {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
-      MaterialApp(home: KeyedSubtree(key: UniqueKey(), child: screen)));
+    MaterialApp(
+      home: KeyedSubtree(key: UniqueKey(), child: screen),
+    ),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -74,6 +80,7 @@ Uint8List _photoWithLocation({int width = 3000, int height = 2000}) {
 }
 
 void main() {
+  late FakeSafetyRepository safety;
   setUp(() {
     final auth = FakeAuthService();
     feed = InMemoryFeedRepository();
@@ -81,6 +88,9 @@ void main() {
     Services.auth = auth;
     Services.profiles = InMemoryProfileRepository(auth);
     Services.feed = feed;
+    safety = FakeSafetyRepository(feed);
+    Services.safety = safety;
+    Services.moderation = FakeModerationRepository(feed, safety);
     Services.media = media;
   });
 
@@ -103,9 +113,20 @@ void main() {
     });
   });
 
-  test('under-18s cannot add videos yet', () {
-    expect(FeedRules.videoBlockedFor(_account('t', age: 15)), isNotNull);
-    expect(FeedRules.videoBlockedFor(_account('a')), isNull);
+  test('under-18 videos wait for a moderator', () {
+    expect(FeedRules.videoReviewNoteFor(_account('t', age: 15)), isNotNull);
+    expect(FeedRules.videoReviewNoteFor(_account('a')), isNull);
+    final draft = NewPost()
+      ..topic = Topic.training
+      ..text = 'Watch my start'
+      ..media = [
+        const MediaItem(id: 'v', kind: MediaKind.video, width: 1, height: 1),
+      ];
+    expect(
+      FeedRules.holdReasonFor(_account('t', age: 15), draft),
+      HoldReason.minorVideo,
+    );
+    expect(FeedRules.holdReasonFor(_account('a'), draft), isNull);
   });
 
   testWidgets('photos show on feed cards', (tester) async {
@@ -121,10 +142,15 @@ void main() {
     final asker = _account('asker', name: 'Asha Rao');
     final question = await _post(asker);
     final first = await feed.addReply(
-        _account('ben', name: 'Ben Ong'), question, 'Sleep well the week before.');
+      _account('ben', name: 'Ben Ong'),
+      question,
+      'Sleep well the week before.',
+    );
 
     await _pump(
-        tester, PostDetailScreen(post: question, viewer: _account('cai')));
+      tester,
+      PostDetailScreen(post: question, viewer: _account('cai')),
+    );
     await tester.tap(find.widgetWithText(TextButton, 'Reply'));
     await tester.pumpAndSettle();
     expect(find.text('Replying to Ben Ong'), findsOneWidget);
@@ -136,28 +162,39 @@ void main() {
     final replies = await feed.replies(question.id);
     expect(replies.last.parentReplyId, first.id);
     // The nested reply sits to the right of its parent.
-    final parentX = tester.getTopLeft(find.text('Sleep well the week before.')).dx;
+    final parentX = tester
+        .getTopLeft(find.text('Sleep well the week before.'))
+        .dx;
     final childX = tester.getTopLeft(find.text('How many hours?')).dx;
     expect(childX, greaterThan(parentX));
   });
 
   testWidgets("adults can't reply to an under-18's reply", (tester) async {
     final post = await _post(_account('a'));
-    final teenReply =
-        await feed.addReply(_account('t', age: 15), post, 'I tried that too.');
+    final teenReply = await feed.addReply(
+      _account('t', age: 15),
+      post,
+      'I tried that too.',
+    );
     expect(
       FeedRules.replyBlockedFor(_account('adult'), post, parent: teenReply),
       'Only under-18s can reply to this reply.',
     );
 
-    await _pump(tester, PostDetailScreen(post: post, viewer: _account('adult')));
+    await _pump(
+      tester,
+      PostDetailScreen(post: post, viewer: _account('adult')),
+    );
     expect(find.widgetWithText(TextButton, 'Reply'), findsNothing);
   });
 
-  testWidgets('a response post shows in the original comments thread',
-      (tester) async {
-    final original = await _post(_account('a', name: 'Alex Tan'),
-        text: 'What does your taper week look like?');
+  testWidgets('a response post shows in the original comments thread', (
+    tester,
+  ) async {
+    final original = await _post(
+      _account('a', name: 'Alex Tan'),
+      text: 'What does your taper week look like?',
+    );
     final me = _account('me');
 
     await _pump(tester, PostDetailScreen(post: original, viewer: me));
@@ -171,19 +208,24 @@ void main() {
     expect(find.text('Respond with a post'), findsOneWidget); // composer title
     expect(find.textContaining('In response to'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField).first,
-        'Here is my full taper plan with the sets I swim.');
+    await tester.enterText(
+      find.byType(TextField).first,
+      'Here is my full taper plan with the sets I swim.',
+    );
     await tester.tap(find.widgetWithText(FilledButton, 'Post'));
     await tester.pumpAndSettle();
 
     expect(find.text('Response post'), findsOneWidget);
-    expect(find.text('Here is my full taper plan with the sets I swim.'),
-        findsOneWidget);
+    expect(
+      find.text('Here is my full taper plan with the sets I swim.'),
+      findsOneWidget,
+    );
     expect((await feed.getPost(original.id))!.responseCount, 1);
   });
 
-  testWidgets('response posts show "In response to" in the feed',
-      (tester) async {
+  testWidgets('response posts show "In response to" in the feed', (
+    tester,
+  ) async {
     final original = await _post(_account('a'), text: 'Original question here');
     await feed.createPost(
       _account('b'),
@@ -194,12 +236,15 @@ void main() {
     );
 
     await _pump(tester, FeedScreen(account: _account('me')));
-    expect(find.textContaining('In response to: "Original question here"'),
-        findsOneWidget);
+    expect(
+      find.textContaining('In response to: "Original question here"'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('profile lists my posts, including anonymous ones',
-      (tester) async {
+  testWidgets('profile lists my posts, including anonymous ones', (
+    tester,
+  ) async {
     final me = _account('me');
     await _post(me, text: 'My named post about pacing.');
     await _post(me, text: 'My anonymous post about nerves.', anonymous: true);
@@ -208,13 +253,16 @@ void main() {
     await _pump(tester, ProfileScreen(account: me, isNewAccount: false));
     expect(find.text('My named post about pacing.'), findsOneWidget);
     expect(find.text('My anonymous post about nerves.'), findsOneWidget);
-    expect(find.text('Posted anonymously. Only you can see it is yours.'),
-        findsOneWidget);
+    expect(
+      find.text('Posted anonymously. Only you can see it is yours.'),
+      findsOneWidget,
+    );
     expect(find.text('Not mine.'), findsNothing);
   });
 
-  testWidgets('journeys tab opens a journey with its posts in order',
-      (tester) async {
+  testWidgets('journeys tab opens a journey with its posts in order', (
+    tester,
+  ) async {
     final me = _account('me');
     final journey = await feed.createJourney(me, 'ACL rehab 2026');
     await _post(me, text: 'Week 1: surgery went well.', journey: journey);
@@ -229,13 +277,15 @@ void main() {
     expect(find.text('Part 1'), findsOneWidget);
     expect(find.text('Part 2'), findsOneWidget);
     final week1 = tester.getTopLeft(find.text('Week 1: surgery went well.')).dy;
-    final week2 =
-        tester.getTopLeft(find.text('Week 2: first physio session.')).dy;
+    final week2 = tester
+        .getTopLeft(find.text('Week 2: first physio session.'))
+        .dy;
     expect(week1, lessThan(week2));
   });
 
-  testWidgets('composer offers photos and video, with limits explained',
-      (tester) async {
+  testWidgets('composer offers photos and video, with limits explained', (
+    tester,
+  ) async {
     await _pump(tester, ComposePostScreen(account: _account('a')));
     expect(find.text('Add photos'), findsOneWidget);
     expect(find.text('Add video'), findsOneWidget);
@@ -249,8 +299,9 @@ void main() {
     ChoiceChip chip(WidgetTester tester, String label) =>
         tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
 
-    testWidgets('opens in Video mode, with Photo and Text available',
-        (tester) async {
+    testWidgets('opens in Video mode, with Photo and Text available', (
+      tester,
+    ) async {
       await _pump(tester, CaptureScreen(account: _account('a')));
       expect(chip(tester, 'Video').selected, isTrue);
       expect(chip(tester, 'Photo').onSelected, isNotNull);
@@ -260,11 +311,11 @@ void main() {
       expect(find.text('Library'), findsOneWidget);
     });
 
-    testWidgets('under-18s start in Photo mode with Video off',
-        (tester) async {
+    testWidgets('under-18s can record video, with a review note', (
+      tester,
+    ) async {
       await _pump(tester, CaptureScreen(account: _account('t', age: 15)));
-      expect(chip(tester, 'Photo').selected, isTrue);
-      expect(chip(tester, 'Video').onSelected, isNull);
+      expect(chip(tester, 'Video').selected, isTrue);
       expect(find.textContaining('Videos from under-18s'), findsOneWidget);
     });
 
@@ -285,12 +336,14 @@ void main() {
       tester,
       Builder(
         builder: (context) => FilledButton(
-          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => ComposePostScreen(
-              account: _account('a'),
-              initialPhotos: [photo],
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ComposePostScreen(
+                account: _account('a'),
+                initialPhotos: [photo],
+              ),
             ),
-          )),
+          ),
           child: const Text('open'),
         ),
       ),

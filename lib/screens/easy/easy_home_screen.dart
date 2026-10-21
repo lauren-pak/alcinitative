@@ -22,11 +22,26 @@ class EasyHomeScreen extends StatefulWidget {
 class _EasyHomeScreenState extends State<EasyHomeScreen> {
   late Future<List<Post>> _posts = _fetch();
 
-  Set<Topic> get _topics => widget.account.profile.topics.isEmpty
-      ? Topic.values.toSet()
-      : widget.account.profile.topics;
+  Set<Topic> get _muted => widget.account.profile.mutedTopics;
 
-  Future<List<Post>> _fetch() => Services.feed.latest(_topics, limit: 20);
+  Set<Topic> get _topics {
+    final picked = widget.account.profile.topics.isEmpty
+        ? Topic.values.toSet()
+        : widget.account.profile.topics;
+    return picked.difference(_muted);
+  }
+
+  Future<List<Post>> _fetch() async {
+    final results = await Future.wait([
+      Services.feed.latest(_topics, limit: 20),
+      Services.safety.blockedUids(widget.account),
+    ]);
+    final blocked = results[1] as Set<String>;
+    return [
+      for (final p in results[0] as List<Post>)
+        if (!blocked.contains(p.author?.uid)) p,
+    ];
+  }
 
   Future<void> _refresh() async {
     final next = _fetch();
@@ -56,8 +71,10 @@ class _EasyHomeScreenState extends State<EasyHomeScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: Text('What do you want to see?',
-                  style: textTheme.titleLarge),
+              child: Text(
+                'What do you want to see?',
+                style: textTheme.titleLarge,
+              ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -70,14 +87,17 @@ class _EasyHomeScreenState extends State<EasyHomeScreen> {
                 childAspectRatio: 1.3,
                 children: [
                   for (final topic in Topic.values)
-                    EasyTile(
-                      icon: topicIcon(topic),
-                      label: easyTopicLabel(topic),
-                      onTap: () => _open(EasyTopicScreen(
-                        account: widget.account,
-                        topic: topic,
-                      )),
-                    ),
+                    if (!_muted.contains(topic))
+                      EasyTile(
+                        icon: topicIcon(topic),
+                        label: easyTopicLabel(topic),
+                        onTap: () => _open(
+                          EasyTopicScreen(
+                            account: widget.account,
+                            topic: topic,
+                          ),
+                        ),
+                      ),
                 ],
               ),
             ),
@@ -87,9 +107,8 @@ class _EasyHomeScreenState extends State<EasyHomeScreen> {
             ),
             _EasyPostList(
               posts: _posts,
-              onOpen: (post) => _open(
-                EasyPostScreen(post: post, viewer: widget.account),
-              ),
+              onOpen: (post) =>
+                  _open(EasyPostScreen(post: post, viewer: widget.account)),
             ),
           ],
         ),
@@ -100,7 +119,11 @@ class _EasyHomeScreenState extends State<EasyHomeScreen> {
 
 /// All posts in one topic.
 class EasyTopicScreen extends StatefulWidget {
-  const EasyTopicScreen({super.key, required this.account, required this.topic});
+  const EasyTopicScreen({
+    super.key,
+    required this.account,
+    required this.topic,
+  });
 
   final Account account;
   final Topic topic;
@@ -142,10 +165,12 @@ class _EasyTopicScreenState extends State<EasyTopicScreen> {
             _EasyPostList(
               posts: _posts,
               onOpen: (post) async {
-                await Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) =>
-                      EasyPostScreen(post: post, viewer: widget.account),
-                ));
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        EasyPostScreen(post: post, viewer: widget.account),
+                  ),
+                );
                 if (mounted) _refresh();
               },
             ),
@@ -177,16 +202,20 @@ class _EasyPostList extends StatelessWidget {
         if (snapshot.hasError) {
           return Padding(
             padding: const EdgeInsets.all(24),
-            child: Text('Something went wrong. Pull down to try again.',
-                style: textTheme.bodyLarge),
+            child: Text(
+              'Something went wrong. Pull down to try again.',
+              style: textTheme.bodyLarge,
+            ),
           );
         }
         final list = snapshot.data!;
         if (list.isEmpty) {
           return Padding(
             padding: const EdgeInsets.all(24),
-            child: Text('No posts yet. You can be the first!',
-                style: textTheme.bodyLarge),
+            child: Text(
+              'No posts yet. You can be the first!',
+              style: textTheme.bodyLarge,
+            ),
           );
         }
         return Column(

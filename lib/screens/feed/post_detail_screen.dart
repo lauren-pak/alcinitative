@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../../models/account.dart';
+import '../../models/moderation.dart';
 import '../../models/post.dart';
 import '../../services/services.dart';
 import '../../widgets/feed_widgets.dart';
 import '../../widgets/media_widgets.dart';
+import '../../widgets/safety_widgets.dart';
+import '../../widgets/tag_widgets.dart';
 import 'capture_screen.dart';
+import 'edit_post_screen.dart';
+import 'tag_search_screen.dart';
 
 /// A post with its comments thread: replies (which can be replied to,
 /// shown indented) and response posts (shown as linked cards).
@@ -55,12 +60,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     try {
       final results = await Future.wait([
         feed.getPost(_post.id),
-        feed.replies(_post.id),
+        feed.replies(_post.id, viewer: widget.viewer),
         feed.responsesTo(_post.id),
         feed.hasBeenThere(_post.id, widget.viewer),
         feed.isMine(_post, widget.viewer),
+        Services.safety.blockedUids(widget.viewer),
       ]);
-      final replies = results[1] as List<Reply>;
+      final blocked = results[5] as Set<String>;
+      final replies = [
+        for (final r in results[1] as List<Reply>)
+          if (!blocked.contains(r.author.uid)) r,
+      ];
       final helpful = await feed.myHelpful(_post.id, replies, widget.viewer);
       if (!mounted) return;
       setState(() {
@@ -69,6 +79,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         _responses = results[2] as List<Post>;
         _beenThere = results[3] as bool;
         _isMine = results[4] as bool;
+        _responses = [
+          for (final p in results[2] as List<Post>)
+            if (!blocked.contains(p.author?.uid)) p,
+        ];
         _myHelpful = helpful;
         _loadError = null;
       });
@@ -146,6 +160,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Future<void> _sendReply() async {
     final text = _replyText.text.trim();
     if (text.isEmpty) return;
+    if (containsFlaggedWords(text) && !await confirmFlaggedPost(context)) {
+      return;
+    }
     await _run(() async {
       final reply = await Services.feed
           .addReply(widget.viewer, _post, text, parent: _replyingTo);
@@ -157,7 +174,43 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         _replyingTo = null;
         _post = _post.copyWith(replyCount: _post.replyCount + 1);
       });
+      if (reply.isHeld) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Thanks! Your reply will show once a moderator has '
+              'checked it.'),
+        ));
+      }
     }, "Couldn't send your reply. Try again.");
+  }
+
+  Future<void> _reportPost() => showReportSheet(
+        context,
+        what: 'this post',
+        onReport: (reason, details) => Services.safety
+            .reportPost(widget.viewer, _post, reason, details: details),
+      );
+
+  Future<void> _reportReply(Reply reply) => showReportSheet(
+        context,
+        what: 'this reply',
+        onReport: (reason, details) => Services.safety
+            .reportReply(widget.viewer, reply, reason, details: details),
+      );
+
+  Future<void> _block(Author author) async {
+    if (!await confirmBlock(context, author.name)) return;
+    await _run(() async {
+      await Services.safety.block(widget.viewer, author);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('You blocked ${author.name}.')),
+      );
+      if (_post.author?.uid == author.uid) {
+        Navigator.of(context).pop();
+      } else {
+        await _load();
+      }
+    }, "Couldn't block. Try again.");
   }
 
   Future<void> _respondWithPost() async {
@@ -171,6 +224,40 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
     if (created != null && mounted) _load();
   }
+
+  Future<void> _edit() async {
+    final edited = await Navigator.of(context).push<Post>(
+      MaterialPageRoute(
+        builder: (_) => EditPostScreen(account: widget.viewer, post: _post),
+      ),
+    );
+    if (edited == null || !mounted) return;
+    setState(() => _post = edited);
+    if (edited.isHeld && !widget.post.isHeld) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Saved. A moderator will check it before others '
+            'see it again.'),
+      ));
+    }
+  }
+
+  Future<void> _delete() async {
+    if (!await confirmDeletePost(context)) return;
+    await _run(() async {
+      await Services.feed.deletePost(widget.viewer, _post);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Post deleted.')));
+      Navigator.of(context).pop();
+    }, "Couldn't delete it. Try again.");
+  }
+
+  void _searchTag(String tag) => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) =>
+              TagSearchScreen(account: widget.viewer, initialTag: tag),
+        ),
+      );
 
   Future<void> _openPost(Post post) async {
     await Navigator.of(context).push(
@@ -211,6 +298,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               : null,
           onHelpedMe:
               canMarkHelped && !_busy ? () => _markHelped(reply) : null,
+          onReport: () => _reportReply(reply),
+          onBlock: reply.author.uid == widget.viewer.uid
+              ? null
+              : () => _block(reply.author),
         ),
       );
       // A copy: sorting the shared (or empty const) list would throw.
@@ -272,6 +363,51 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             icon: const Icon(Icons.support_outlined),
             onPressed: () => showSupportSheet(context),
           ),
+          if (_isMine)
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (choice) => choice == 'edit' ? _edit() : _delete(),
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Edit post'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('Delete post'),
+                  ),
+                ),
+              ],
+            )
+          else
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (choice) => choice == 'report'
+                  ? _reportPost()
+                  : _block(post.author!),
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'report',
+                  child: ListTile(
+                    leading: Icon(Icons.flag_outlined),
+                    title: Text('Report post'),
+                  ),
+                ),
+                if (post.author case final author?)
+                  PopupMenuItem(
+                    value: 'block',
+                    child: ListTile(
+                      leading: const Icon(Icons.block),
+                      title: Text('Block ${author.name}'),
+                    ),
+                  ),
+              ],
+            ),
         ],
       ),
       body: GestureDetector(
@@ -284,6 +420,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    if (post.isHeld) ...[
+                      HeldBanner(reason: post.holdReason),
+                      const SizedBox(height: 12),
+                    ],
                     PostHeader(post: post),
                     if (post.respondsToText != null) ...[
                       const SizedBox(height: 8),
@@ -323,6 +463,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     if (post.media.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       PostMediaView(media: post.media),
+                    ],
+                    if (post.tags.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      TagChips(tags: post.tags, onTap: _searchTag),
                     ],
                     if (post.needsAdviceBanner) ...[
                       const SizedBox(height: 12),
@@ -477,6 +621,8 @@ class _ReplyTile extends StatelessWidget {
     required this.onHelpful,
     required this.onReply,
     required this.onHelpedMe,
+    required this.onReport,
+    required this.onBlock,
   });
 
   final Reply reply;
@@ -485,6 +631,10 @@ class _ReplyTile extends StatelessWidget {
   final VoidCallback? onHelpful;
   final VoidCallback? onReply;
   final VoidCallback? onHelpedMe;
+  final VoidCallback onReport;
+
+  /// Null for the viewer's own replies.
+  final VoidCallback? onBlock;
 
   @override
   Widget build(BuildContext context) {
@@ -506,6 +656,11 @@ class _ReplyTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (reply.isHeld)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6, right: 8),
+              child: HeldBanner(reason: reply.holdReason),
+            ),
           if (reply.helpedAsker)
             const Padding(
               padding: EdgeInsets.only(bottom: 6),
@@ -527,6 +682,20 @@ class _ReplyTile extends StatelessWidget {
                 ),
                 Text(timeAgo(context, reply.createdAt),
                     style: textTheme.bodySmall),
+                if (onBlock != null)
+                  PopupMenuButton<String>(
+                    tooltip: 'More',
+                    iconSize: 18,
+                    padding: EdgeInsets.zero,
+                    onSelected: (c) => c == 'report' ? onReport() : onBlock!(),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                          value: 'report', child: Text('Report reply')),
+                      PopupMenuItem(
+                          value: 'block',
+                          child: Text('Block ${reply.author.name}')),
+                    ],
+                  ),
               ],
             ),
           ),

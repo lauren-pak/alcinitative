@@ -19,11 +19,25 @@ abstract class FeedRepository {
 
   Future<Post> createPost(Account author, NewPost draft);
 
-  Future<List<Reply>> replies(String postId);
+  /// Visible replies, plus [viewer]'s own replies still waiting for a
+  /// moderator.
+  Future<List<Reply>> replies(String postId, {Account? viewer});
 
   /// [parent] makes it a reply to another reply (a nested thread).
   Future<Reply> addReply(Account author, Post post, String text,
       {Reply? parent});
+
+  /// Changes the text and tags of [author]'s own post. An edit that adds
+  /// flagged words holds the post for a moderator again.
+  Future<Post> editPost(Account author, Post post,
+      {required String text, required List<String> tags});
+
+  /// Deletes [author]'s own post, its photos and videos, and its private
+  /// author link.
+  Future<void> deletePost(Account author, Post post);
+
+  /// Visible posts with [tag], newest first.
+  Future<List<Post>> withTag(String tag, {int limit = 30});
 
   /// Posts written in response to [postId], oldest first.
   Future<List<Post>> responsesTo(String postId);

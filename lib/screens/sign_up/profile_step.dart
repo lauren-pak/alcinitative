@@ -192,6 +192,18 @@ class _ProfileStepState extends State<ProfileStep> {
               () => _setMode(on ? DisplayMode.easy : DisplayMode.standard),
             ),
           ),
+          if (data.canBeFindableOn(DateTime.now()))
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.person_search_outlined),
+              title: const Text('Show me in Find athlete'),
+              subtitle: const Text(
+                'Other members can find your ID card by your name, sport or '
+                'programme. You can turn this off any time in Settings.',
+              ),
+              value: data.findable,
+              onChanged: (on) => setState(() => data.findable = on),
+            ),
           if (_error != null) ...[
             const SizedBox(height: 16),
             Text(_error!, style: TextStyle(color: scheme.error)),

@@ -1,5 +1,6 @@
 import 'account.dart';
 import 'media.dart';
+import 'moderation.dart';
 import 'sign_up_data.dart';
 
 enum PostType {
@@ -74,6 +75,12 @@ class Post {
     this.media = const [],
     this.respondsToId,
     this.respondsToText,
+    this.status = ContentStatus.visible,
+    this.holdReason,
+    this.reportCount = 0,
+    this.adultRepliesAllowed = false,
+    this.tags = const [],
+    this.editedAt,
     this.answered = false,
     this.replyCount = 0,
     this.responseCount = 0,
@@ -106,6 +113,22 @@ class Post {
   /// The start of the post this responds to, for the "In response to" line.
   final String? respondsToText;
 
+  final ContentStatus status;
+  final HoldReason? holdReason;
+  final int reportCount;
+
+  /// An under-18 poster's choice to let adults reply. Each adult reply is
+  /// held for a moderator.
+  final bool adultRepliesAllowed;
+
+  bool get isHeld => status == ContentStatus.held;
+
+  /// Lowercase search tags, e.g. "acl" (see [normaliseTag]).
+  final List<String> tags;
+
+  /// When the author last edited the text or tags; null if never.
+  final DateTime? editedAt;
+
   /// A question whose asker marked a reply "This helped me".
   final bool answered;
   final int replyCount;
@@ -136,16 +159,22 @@ class Post {
       topic == Topic.injury || topic == Topic.nutrition;
 
   Post copyWith({
+    String? text,
+    List<String>? tags,
+    DateTime? editedAt,
+    HoldReason? holdReason,
     bool? answered,
     int? replyCount,
     int? responseCount,
     int? beenThereCount,
+    ContentStatus? status,
+    int? reportCount,
   }) =>
       Post(
         id: id,
         type: type,
         topic: topic,
-        text: text,
+        text: text ?? this.text,
         createdAt: createdAt,
         author: author,
         authorRole: authorRole,
@@ -156,6 +185,12 @@ class Post {
         media: media,
         respondsToId: respondsToId,
         respondsToText: respondsToText,
+        status: status ?? this.status,
+        holdReason: holdReason ?? this.holdReason,
+        reportCount: reportCount ?? this.reportCount,
+        adultRepliesAllowed: adultRepliesAllowed,
+        tags: tags ?? this.tags,
+        editedAt: editedAt ?? this.editedAt,
         answered: answered ?? this.answered,
         replyCount: replyCount ?? this.replyCount,
         responseCount: responseCount ?? this.responseCount,
@@ -174,6 +209,9 @@ class Reply {
     this.parentReplyId,
     this.helpfulCount = 0,
     this.helpedAsker = false,
+    this.status = ContentStatus.visible,
+    this.holdReason,
+    this.reportCount = 0,
   });
 
   final String id;
@@ -190,10 +228,25 @@ class Reply {
   /// The asker marked this reply "This helped me".
   final bool helpedAsker;
 
-  Reply copyWith({int? helpfulCount, bool? helpedAsker}) => Reply(
+  final ContentStatus status;
+  final HoldReason? holdReason;
+  final int reportCount;
+
+  bool get isHeld => status == ContentStatus.held;
+
+  Reply copyWith({
+    int? helpfulCount,
+    bool? helpedAsker,
+    ContentStatus? status,
+    int? reportCount,
+  }) =>
+      Reply(
         id: id,
         postId: postId,
         parentReplyId: parentReplyId,
+        status: status ?? this.status,
+        holdReason: holdReason,
+        reportCount: reportCount ?? this.reportCount,
         author: author,
         minorAuthor: minorAuthor,
         text: text,
@@ -226,6 +279,24 @@ class NewPost {
 
   /// The post this one responds to, if any.
   Post? respondingTo;
+
+  /// Under-18s only: let adults reply (each reply is reviewed first).
+  bool adultRepliesAllowed = false;
+
+  /// Search tags, already normalised (see [normaliseTag]).
+  List<String> tags = [];
+}
+
+/// Most tags a post can have.
+const maxTags = 5;
+
+/// Turns what someone typed into a tag: lowercase letters and numbers only,
+/// 2 to 20 long, without the "#". Returns null if nothing usable is left.
+/// `firestore.rules` checks the same format.
+String? normaliseTag(String input) {
+  final tag = input.toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
+  if (tag.length < 2) return null;
+  return tag.length > 20 ? tag.substring(0, 20) : tag;
 }
 
 /// Length of the quote shown in "In response to".
@@ -245,18 +316,54 @@ class FeedRules {
           ? const [PostType.question]
           : PostType.values;
 
-  /// Under-18 nutrition posts need moderator review, which arrives in
-  /// stage 2 of the feed. Until then they can't be posted.
-  static String? topicBlockedFor(Account a, Topic topic) =>
+  /// Shown when a choice means the post waits for a moderator.
+  static String? topicReviewNoteFor(Account a, Topic topic) =>
       topic == Topic.nutrition && isMinor(a)
           ? 'Sports nutrition posts from under-18s are checked by a '
-              "moderator first. That's coming soon."
+              'moderator before others can see them.'
           : null;
 
-  /// Under-18 videos need moderator review first (stage 2).
-  static String? videoBlockedFor(Account a) => isMinor(a)
-      ? "Videos from under-18s are checked by a moderator first. That's "
-          'coming soon. You can add photos.'
+  /// Why [draft] would wait for a moderator, or null if it goes straight
+  /// into the feed. Mirrors `postHoldReason` in `firestore.rules`.
+  static HoldReason? holdReasonFor(Account a, NewPost draft) {
+    if (flagged(draft.text, draft.tags)) return HoldReason.flaggedWords;
+    if (!isMinor(a)) {
+      return draft.respondingTo?.minorAuthor ?? false
+          ? HoldReason.adultReplyToMinor
+          : null;
+    }
+    if (draft.topic == Topic.nutrition) return HoldReason.minorNutrition;
+    if (draft.media.any((m) => m.kind == MediaKind.video)) {
+      return HoldReason.minorVideo;
+    }
+    return null;
+  }
+
+  /// Flagged words in a post's text or tags.
+  static bool flagged(String text, List<String> tags) =>
+      containsFlaggedWords([text, ...tags].join(' '));
+
+  /// An edit that adds flagged words sends a visible post back for review.
+  /// Held and removed posts stay as they are.
+  static HoldReason? editHoldReasonFor(
+          Post post, String text, List<String> tags) =>
+      post.status == ContentStatus.visible && flagged(text, tags)
+          ? HoldReason.flaggedWords
+          : null;
+
+  /// Why a reply would wait for a moderator. Mirrors `firestore.rules`.
+  static HoldReason? replyHoldReasonFor(Account viewer, Post post, String text) {
+    if (containsFlaggedWords(text)) return HoldReason.flaggedWords;
+    if (post.minorAuthor && !isMinor(viewer)) {
+      return HoldReason.adultReplyToMinor;
+    }
+    return null;
+  }
+
+  /// Under-18 videos are checked by a person before going live.
+  static String? videoReviewNoteFor(Account a) => isMinor(a)
+      ? 'Videos from under-18s are checked by a moderator before others '
+          'can see them.'
       : null;
 
   /// Null if [viewer] may reply to [post], or to [parent] within it.
@@ -267,8 +374,9 @@ class FeedRules {
         viewer.profile.role != UserRole.athlete) {
       return 'Only athletes can reply to this post.';
     }
-    // Adult replies to under-18s will need moderator review (stage 2).
-    if (post.minorAuthor && !isMinor(viewer)) {
+    // Adults can reply to an under-18 only if they allowed it; each such
+    // reply waits for a moderator.
+    if (post.minorAuthor && !isMinor(viewer) && !post.adultRepliesAllowed) {
       return 'Only under-18s can reply to this post.';
     }
     if (parent != null && parent.minorAuthor && !isMinor(viewer)) {

@@ -3,6 +3,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 
 import '../models/account.dart';
 import '../models/media.dart';
+import '../models/moderation.dart';
 import '../models/post.dart';
 import '../models/sign_up_data.dart';
 import 'feed_repository.dart';
@@ -23,6 +24,10 @@ class FirestoreFeedRepository implements FeedRepository {
 
   CollectionReference<Map<String, dynamic>> get _posts =>
       _db.collection('posts');
+  /// Only posts everyone may see. Held and removed posts never reach the
+  /// feed (the rules refuse queries without this filter).
+  Query<Map<String, dynamic>> get _visible =>
+      _posts.where('status', isEqualTo: ContentStatus.visible.name);
   CollectionReference<Map<String, dynamic>> get _journeys =>
       _db.collection('journeys');
   DocumentReference<Map<String, dynamic>> _postAuthor(String postId) =>
@@ -45,7 +50,7 @@ class FirestoreFeedRepository implements FeedRepository {
   @override
   Future<List<Post>> latest(Set<Topic> topics, {int limit = 30}) async {
     if (topics.isEmpty) return [];
-    final snapshot = await _posts
+    final snapshot = await _visible
         .where('topic', whereIn: [for (final t in topics) t.name])
         .orderBy('createdAt', descending: true)
         .limit(limit)
@@ -56,7 +61,7 @@ class FirestoreFeedRepository implements FeedRepository {
   @override
   Future<List<Post>> needsAnswer(Set<Topic> topics, {int limit = 5}) async {
     if (topics.isEmpty) return [];
-    final snapshot = await _posts
+    final snapshot = await _visible
         .where('type', isEqualTo: PostType.question.name)
         .where('answered', isEqualTo: false)
         .where('topic', whereIn: [for (final t in topics) t.name])
@@ -92,6 +97,7 @@ class FirestoreFeedRepository implements FeedRepository {
     final minor = FeedRules.isMinor(author);
     final target = draft.respondingTo;
     final preview = target == null ? null : _preview(target.text);
+    final hold = FeedRules.holdReasonFor(author, draft);
     final batch = _db.batch()
       ..set(ref, {
         'type': draft.type.name,
@@ -103,10 +109,16 @@ class FirestoreFeedRepository implements FeedRepository {
         'replyPolicy': draft.replyPolicy.name,
         'anonymous': draft.anonymous,
         'answered': false,
+        'status': (hold == null ? ContentStatus.visible : ContentStatus.held)
+            .name,
+        if (hold != null) 'holdReason': hold.name,
+        'reportCount': 0,
+        'adultRepliesAllowed': minor && draft.adultRepliesAllowed,
         'replyCount': 0,
         'responseCount': 0,
         'beenThereCount': 0,
         'media': [for (final m in draft.media) m.toMap()],
+        if (draft.tags.isNotEmpty) 'tags': draft.tags,
         if (!draft.anonymous) ..._authorFields(Author.of(author)),
         if (journey != null) ...{
           'journeyId': journey.id,
@@ -143,7 +155,62 @@ class FirestoreFeedRepository implements FeedRepository {
       media: draft.media,
       respondsToId: target?.id,
       respondsToText: preview,
+      status: hold == null ? ContentStatus.visible : ContentStatus.held,
+      holdReason: hold,
+      adultRepliesAllowed: minor && draft.adultRepliesAllowed,
+      tags: draft.tags,
     );
+  }
+
+  @override
+  Future<Post> editPost(Account author, Post post,
+      {required String text, required List<String> tags}) async {
+    final hold = FeedRules.editHoldReasonFor(post, text.trim(), tags);
+    await _posts.doc(post.id).update({
+      'text': text.trim(),
+      'tags': tags,
+      'editedAt': FieldValue.serverTimestamp(),
+      if (hold != null) ...{
+        'status': ContentStatus.held.name,
+        'holdReason': hold.name,
+      },
+    });
+    return post.copyWith(
+      text: text.trim(),
+      tags: tags,
+      editedAt: DateTime.now(),
+      status: hold == null ? null : ContentStatus.held,
+      holdReason: hold,
+    );
+  }
+
+  @override
+  Future<void> deletePost(Account author, Post post) async {
+    // Everything recorded for this post: the post, its author link, and
+    // its media (owner records and stored files, named by media ID).
+    final mediaIds = [for (final m in post.media) m.id];
+    final contributions = await _contributions(author.uid).get();
+    final mine = [
+      for (final c in contributions.docs)
+        if (_belongsToPost(c.data()['path'] as String? ?? '', post.id, mediaIds))
+          c,
+    ];
+    await _deleteRecorded(mine);
+  }
+
+  static bool _belongsToPost(String path, String postId, List<String> mediaIds) =>
+      path == 'posts/$postId' ||
+      path == 'postAuthors/$postId' ||
+      mediaIds.any(path.contains);
+
+  @override
+  Future<List<Post>> withTag(String tag, {int limit = 30}) async {
+    final snapshot = await _visible
+        .where('tags', arrayContains: tag)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+    return [for (final doc in snapshot.docs) _postFrom(doc.id, doc.data())];
   }
 
   static String _preview(String text) => text.length <= respondsToPreviewLength
@@ -152,7 +219,7 @@ class FirestoreFeedRepository implements FeedRepository {
 
   @override
   Future<List<Post>> responsesTo(String postId) async {
-    final snapshot = await _posts
+    final snapshot = await _visible
         .where('respondsToId', isEqualTo: postId)
         .orderBy('createdAt')
         .get();
@@ -169,10 +236,17 @@ class FirestoreFeedRepository implements FeedRepository {
         if (_isPostPath(c.data()['path'] as String? ?? ''))
           (c.data()['path'] as String).split('/')[1],
     ];
-    final docs = await Future.wait([for (final id in ids) _posts.doc(id).get()]);
+    final docs = await Future.wait([
+      for (final id in ids)
+        _posts.doc(id).get().then<DocumentSnapshot<Map<String, dynamic>>?>(
+              (d) => d,
+              // Gone (deleted or never finished): skip it.
+              onError: (_) => null,
+            ),
+    ]);
     final posts = [
       for (final d in docs)
-        if (d.data() case final data?) _postFrom(d.id, data),
+        if (d?.data() case final data?) _postFrom(d!.id, data),
     ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return posts;
   }
@@ -184,7 +258,7 @@ class FirestoreFeedRepository implements FeedRepository {
 
   @override
   Future<List<Post>> postsInJourney(String journeyId) async {
-    final snapshot = await _posts
+    final snapshot = await _visible
         .where('journeyId', isEqualTo: journeyId)
         .orderBy('createdAt')
         .get();
@@ -192,15 +266,25 @@ class FirestoreFeedRepository implements FeedRepository {
   }
 
   @override
-  Future<List<Reply>> replies(String postId) async {
-    final snapshot = await _posts
-        .doc(postId)
-        .collection('replies')
+  Future<List<Reply>> replies(String postId, {Account? viewer}) async {
+    final collection = _posts.doc(postId).collection('replies');
+    final visible = collection
+        .where('status', isEqualTo: ContentStatus.visible.name)
         .orderBy('createdAt')
         .get();
-    return [
-      for (final doc in snapshot.docs) _replyFrom(postId, doc.id, doc.data()),
+    // The viewer's own replies still waiting for a moderator.
+    final mine = viewer == null
+        ? null
+        : collection
+            .where('authorUid', isEqualTo: viewer.uid)
+            .where('status', isEqualTo: ContentStatus.held.name)
+            .get();
+    final docs = [
+      ...(await visible).docs,
+      if (mine != null) ...(await mine).docs,
     ];
+    return [for (final d in docs) _replyFrom(postId, d.id, d.data())]
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
   }
 
   @override
@@ -209,10 +293,15 @@ class FirestoreFeedRepository implements FeedRepository {
     final postRef = _posts.doc(post.id);
     final ref = postRef.collection('replies').doc();
     final minor = FeedRules.isMinor(author);
+    final hold = FeedRules.replyHoldReasonFor(author, post, text);
     final batch = _db.batch()
       ..set(ref, {
         ..._authorFields(Author.of(author)),
         if (parent != null) 'parentReplyId': parent.id,
+        'status': (hold == null ? ContentStatus.visible : ContentStatus.held)
+            .name,
+        if (hold != null) 'holdReason': hold.name,
+        'reportCount': 0,
         'authorRole': author.profile.role!.name,
         'minorAuthor': minor,
         'text': text.trim(),
@@ -235,6 +324,8 @@ class FirestoreFeedRepository implements FeedRepository {
       minorAuthor: minor,
       text: text.trim(),
       createdAt: DateTime.now(),
+      status: hold == null ? ContentStatus.visible : ContentStatus.held,
+      holdReason: hold,
     );
   }
 
@@ -333,6 +424,12 @@ class FirestoreFeedRepository implements FeedRepository {
   @override
   Future<void> deleteContributions(Account account) async {
     final contributions = await _contributions(account.uid).get();
+    await _deleteRecorded(contributions.docs);
+  }
+
+  /// Deletes recorded documents and files, and their contribution records.
+  Future<void> _deleteRecorded(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> contributions) async {
     // Storage files first, and ownership links (author, media owner) last:
     // the rules check those links when deleting posts and files.
     int rank(QueryDocumentSnapshot<Map<String, dynamic>> d) {
@@ -344,7 +441,7 @@ class FirestoreFeedRepository implements FeedRepository {
       return 1;
     }
 
-    final docs = [...contributions.docs]
+    final docs = [...contributions]
       ..sort((a, b) => rank(a) - rank(b));
     for (final c in docs.where((d) => rank(d) == 0)) {
       try {
@@ -408,6 +505,13 @@ class FirestoreFeedRepository implements FeedRepository {
         ],
         respondsToId: d['respondsToId'] as String?,
         respondsToText: d['respondsToText'] as String?,
+        status: _enum(ContentStatus.values, d['status']) ??
+            ContentStatus.visible,
+        holdReason: _enum(HoldReason.values, d['holdReason']),
+        reportCount: (d['reportCount'] as num?)?.toInt() ?? 0,
+        adultRepliesAllowed: d['adultRepliesAllowed'] as bool? ?? false,
+        tags: [for (final t in (d['tags'] as List?) ?? const []) t as String],
+        editedAt: (d['editedAt'] as Timestamp?)?.toDate(),
         answered: d['answered'] as bool? ?? false,
         replyCount: (d['replyCount'] as num?)?.toInt() ?? 0,
         responseCount: (d['responseCount'] as num?)?.toInt() ?? 0,
@@ -419,6 +523,10 @@ class FirestoreFeedRepository implements FeedRepository {
         id: id,
         postId: postId,
         parentReplyId: d['parentReplyId'] as String?,
+        status: _enum(ContentStatus.values, d['status']) ??
+            ContentStatus.visible,
+        holdReason: _enum(HoldReason.values, d['holdReason']),
+        reportCount: (d['reportCount'] as num?)?.toInt() ?? 0,
         author: _authorFrom(d)!,
         minorAuthor: d['minorAuthor'] as bool? ?? true,
         text: d['text'] as String? ?? '',

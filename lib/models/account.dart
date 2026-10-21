@@ -42,3 +42,24 @@ String normaliseAthleteId(String input) {
       .replaceFirst(RegExp('^AA'), '');
   return 'AA-$code';
 }
+
+/// Lowercase words of a name or search, e.g. "Sam Taylor" → [sam, taylor].
+List<String> searchWords(String text) => [
+      for (final w in text.toLowerCase().split(RegExp(r'[^a-z0-9]+')))
+        if (w.isNotEmpty) w,
+    ];
+
+/// Every prefix of every word in [name] (from 1 letter, up to 15), so a
+/// search for "tay" finds "Sam Taylor". Stored on findable ID cards only.
+List<String> nameSearchKeys(String name) => {
+      for (final w in searchWords(name))
+        for (var i = 1; i <= w.length && i <= 15; i++) w.substring(0, i),
+    }.take(60).toList();
+
+/// Whether every search word starts one of the name's words.
+bool matchesName(String name, List<String> searchWordList) {
+  final words = searchWords(name);
+  return searchWordList.every(
+    (s) => words.any((w) => w.startsWith(s.length > 15 ? s.substring(0, 15) : s)),
+  );
+}

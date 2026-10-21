@@ -18,6 +18,14 @@ abstract class ProfileRepository {
   /// viewer isn't allowed to see it (adults can't see under-18s).
   Future<Account?> findById(String athleteId);
 
+  /// Athletes who opted in to name search ([SignUpData.findable]) whose
+  /// first or last name starts with the words in [query]. Up to 20.
+  Future<List<Account>> searchByName(String query);
+
+  /// Findable athletes ([SignUpData.findable]) in [sport] and/or
+  /// [category] (either may be null for "any"), by name. Up to 50.
+  Future<List<Account>> browse({String? sport, AthleteCategory? category});
+
   /// Deletes the member's profile and athlete ID card.
   Future<void> delete(Account account);
 }

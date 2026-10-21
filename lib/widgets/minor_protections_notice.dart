@@ -30,9 +30,10 @@ class MinorProtectionsNotice extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Your profile is hidden from search, only other under-18s '
-                    'can comment on your posts, and videos are checked before '
-                    'they go live.',
+                    'Your profile is hidden from search. Only other under-18s '
+                    'can reply to your posts, unless you let adults reply, '
+                    'and then a moderator checks their replies first. Your '
+                    'videos and food posts are checked before they go live.',
                     style: textTheme.bodyMedium
                         ?.copyWith(color: scheme.onSecondaryContainer),
                   ),

@@ -4,6 +4,7 @@ import '../config/support_config.dart';
 import '../models/post.dart';
 import '../models/sign_up_data.dart';
 import 'media_widgets.dart';
+import 'tag_widgets.dart';
 
 /// Picture icon for each topic, used everywhere the topic appears.
 IconData topicIcon(Topic topic) => switch (topic) {
@@ -179,6 +180,13 @@ class PostCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (post.isHeld) ...[
+                const FeedChip(
+                  label: 'Waiting for a moderator',
+                  icon: Icons.hourglass_top,
+                ),
+                const SizedBox(height: 8),
+              ],
               PostHeader(post: post),
               if (post.respondsToText != null) ...[
                 const SizedBox(height: 8),
@@ -217,6 +225,10 @@ class PostCard extends StatelessWidget {
               if (post.media.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 MediaPreviewGrid(media: post.media),
+              ],
+              if (post.tags.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                TagChips(tags: post.tags),
               ],
               if (post.needsAdviceBanner) ...[
                 const SizedBox(height: 10),
@@ -303,7 +315,12 @@ class PostHeader extends StatelessWidget {
             ],
           ),
         ),
-        Text(timeAgo(context, post.createdAt), style: textTheme.bodySmall),
+        Text(
+          post.editedAt == null
+              ? timeAgo(context, post.createdAt)
+              : '${timeAgo(context, post.createdAt)} · edited',
+          style: textTheme.bodySmall,
+        ),
       ],
     );
   }

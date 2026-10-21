@@ -11,6 +11,8 @@ import '../../models/sign_up_data.dart';
 import '../../services/media_prep.dart';
 import '../../services/services.dart';
 import '../../widgets/feed_widgets.dart';
+import '../../widgets/safety_widgets.dart';
+import '../../widgets/tag_widgets.dart';
 
 /// Write an experience or a question, optionally with photos or a video, or
 /// in response to another post. Pops with the created [Post].
@@ -65,10 +67,9 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
     _photos.addAll(widget.initialPhotos);
     final target = widget.respondingTo;
     if (target != null) {
-      _draft.respondingTo = target;
-      if (FeedRules.topicBlockedFor(_account, target.topic) == null) {
-        _draft.topic = target.topic;
-      }
+      _draft
+        ..respondingTo = target
+        ..topic = target.topic;
     }
     if (_isAthlete) _loadJourneys();
   }
@@ -108,10 +109,6 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
   }
 
   Future<void> _addVideo() async {
-    if (FeedRules.videoBlockedFor(_account) case final reason?) {
-      _showError(reason);
-      return;
-    }
     final picked = await _picker.pickVideo(
       source: ImageSource.gallery,
       maxDuration: maxVideoDuration,
@@ -212,8 +209,6 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
     String? error;
     if (topic == null) {
       error = 'Choose a topic';
-    } else if (FeedRules.topicBlockedFor(_account, topic) case final reason?) {
-      error = reason;
     } else if (_draft.text.trim().length < _requiredLength) {
       error = _hasMedia
           ? 'Add a few words about it'
@@ -223,6 +218,11 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
       _showError(error);
       return;
     }
+    if (FeedRules.flagged(_draft.text, _draft.tags) &&
+        !await confirmFlaggedPost(context)) {
+      return;
+    }
+    if (!mounted) return;
 
     setState(() {
       _posting = true;
@@ -331,20 +331,19 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                       avatar: Icon(topicIcon(topic), size: 18),
                       label: Text(topic.label),
                       selected: _draft.topic == topic,
-                      onSelected:
-                          FeedRules.topicBlockedFor(_account, topic) != null
-                              ? null
-                              : (_) => setState(() {
-                                    _draft.topic = topic;
-                                    _error = null;
-                                  }),
+                      onSelected: (_) => setState(() {
+                        _draft.topic = topic;
+                        _error = null;
+                      }),
                     ),
                 ],
               ),
-              if (FeedRules.topicBlockedFor(_account, Topic.nutrition)
-                  case final reason?) ...[
+              if (_draft.topic != null &&
+                  FeedRules.topicReviewNoteFor(_account, _draft.topic!) != null)
+                ...[
                 const SizedBox(height: 6),
-                Text(reason, style: textTheme.bodySmall),
+                Text(FeedRules.topicReviewNoteFor(_account, _draft.topic!)!,
+                    style: textTheme.bodySmall),
               ],
               if (_draft.topic == Topic.injury ||
                   _draft.topic == Topic.nutrition) ...[
@@ -381,18 +380,23 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                 photos: _photos,
                 video: _video,
                 busy: _preparingMedia,
-                videoBlocked: FeedRules.videoBlockedFor(_account),
+                videoNote: FeedRules.videoReviewNoteFor(_account),
                 onAddPhotos: _addPhotos,
                 onAddVideo: _addVideo,
                 onRemovePhoto: (i) => setState(() => _photos.removeAt(i)),
                 onRemoveVideo: () => setState(() => _video = null),
               ),
               const SizedBox(height: 16),
+              TagEditor(
+                tags: _draft.tags,
+                onChanged: (tags) => setState(() => _draft.tags = tags),
+              ),
+              const SizedBox(height: 16),
               DropdownButtonFormField<ReplyPolicy>(
                 initialValue: _draft.replyPolicy,
                 decoration: InputDecoration(
                   labelText: 'Who can reply',
-                  helperText: _isMinor
+                  helperText: _isMinor && !_draft.adultRepliesAllowed
                       ? 'Only other under-18s can reply to your posts.'
                       : null,
                   border: const OutlineInputBorder(),
@@ -413,6 +417,18 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                 ],
                 onChanged: (v) => setState(() => _draft.replyPolicy = v!),
               ),
+              if (_isMinor)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _draft.adultRepliesAllowed,
+                  onChanged: (v) =>
+                      setState(() => _draft.adultRepliesAllowed = v),
+                  title: const Text('Let adults reply'),
+                  subtitle: const Text(
+                    "Off unless you turn it on. Adults' replies are checked "
+                    'by a moderator before anyone sees them.',
+                  ),
+                ),
               const SizedBox(height: 4),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -480,7 +496,7 @@ class _MediaPicker extends StatelessWidget {
     required this.photos,
     required this.video,
     required this.busy,
-    required this.videoBlocked,
+    required this.videoNote,
     required this.onAddPhotos,
     required this.onAddVideo,
     required this.onRemovePhoto,
@@ -490,7 +506,9 @@ class _MediaPicker extends StatelessWidget {
   final List<PreparedPhoto> photos;
   final PreparedVideo? video;
   final bool busy;
-  final String? videoBlocked;
+
+  /// Shown when videos will be reviewed (under-18s).
+  final String? videoNote;
   final VoidCallback onAddPhotos;
   final VoidCallback onAddVideo;
   final ValueChanged<int> onRemovePhoto;
@@ -501,8 +519,7 @@ class _MediaPicker extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final canAddPhotos =
         !busy && video == null && photos.length < maxPhotosPerPost;
-    final canAddVideo =
-        !busy && video == null && photos.isEmpty && videoBlocked == null;
+    final canAddVideo = !busy && video == null && photos.isEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -536,8 +553,7 @@ class _MediaPicker extends StatelessWidget {
           '(${maxVideoDuration.inSeconds}s). Location data is removed.',
           style: textTheme.bodySmall,
         ),
-        if (videoBlocked != null)
-          Text(videoBlocked!, style: textTheme.bodySmall),
+        if (videoNote != null) Text(videoNote!, style: textTheme.bodySmall),
         if (photos.isNotEmpty || video != null) ...[
           const SizedBox(height: 8),
           SizedBox(

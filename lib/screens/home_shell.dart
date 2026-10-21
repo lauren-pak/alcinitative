@@ -58,7 +58,16 @@ class _HomeShellState extends State<HomeShell> {
             : CaptureScreen(account: widget.account),
       ),
     );
-    if (created != null && mounted) setState(() => _version++);
+    if (created == null || !mounted) return;
+    setState(() => _version++);
+    if (created.isHeld) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(isEasyMode
+            ? 'Thank you! A helper will check your post before others see it.'
+            : 'Thanks! Your post will appear once a moderator has checked it. '
+                'You can see it on your profile.'),
+      ));
+    }
   }
 
   @override

@@ -6,6 +6,7 @@ import '../../models/sign_up_data.dart';
 import '../../services/services.dart';
 import '../../widgets/feed_widgets.dart';
 import 'post_detail_screen.dart';
+import 'tag_search_screen.dart';
 
 /// The feed: "For you" (questions needing answers, then the latest posts in
 /// the member's topics), then one tab per topic. New posts are started from
@@ -23,18 +24,36 @@ class _FeedScreenState extends State<FeedScreen> {
   /// Part of each tab's key; fixed per FeedScreen instance.
   static const _generation = 0;
 
-  Set<Topic> get _myTopics => widget.account.profile.topics.isEmpty
-      ? Topic.values.toSet()
-      : widget.account.profile.topics;
+  Set<Topic> get _muted => widget.account.profile.mutedTopics;
+
+  /// Topic tabs, minus any the member muted.
+  List<Topic> get _tabs =>
+      [for (final t in Topic.values) if (!_muted.contains(t)) t];
+
+  Set<Topic> get _myTopics {
+    final picked = widget.account.profile.topics.isEmpty
+        ? Topic.values.toSet()
+        : widget.account.profile.topics;
+    return picked.difference(_muted);
+  }
 
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 1 + Topic.values.length,
+      length: 1 + _tabs.length,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Feed'),
           actions: [
+            IconButton(
+              tooltip: 'Search tags',
+              icon: const Icon(Icons.tag),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TagSearchScreen(account: widget.account),
+                ),
+              ),
+            ),
             IconButton(
               tooltip: 'Get help',
               icon: const Icon(Icons.support_outlined),
@@ -46,7 +65,7 @@ class _FeedScreenState extends State<FeedScreen> {
             tabAlignment: TabAlignment.start,
             tabs: [
               const Tab(icon: Icon(Icons.auto_awesome_outlined), text: 'For you'),
-              for (final topic in Topic.values)
+              for (final topic in _tabs)
                 Tab(icon: Icon(topicIcon(topic)), text: topic.label),
             ],
           ),
@@ -58,7 +77,7 @@ class _FeedScreenState extends State<FeedScreen> {
               account: widget.account,
               topics: _myTopics,
             ),
-            for (final topic in Topic.values)
+            for (final topic in _tabs)
               _FeedList(
                 key: ValueKey('${topic.name}-$_generation'),
                 account: widget.account,
@@ -100,8 +119,14 @@ class _FeedListState extends State<_FeedList>
     final results = await Future.wait([
       feed.needsAnswer(widget.topics, limit: widget.needsAnswerLimit),
       feed.latest(widget.topics),
+      Services.safety.blockedUids(widget.account),
     ]);
-    return (results[0], results[1]);
+    final blocked = results[2] as Set<String>;
+    List<Post> shown(Object list) => [
+          for (final p in list as List<Post>)
+            if (!blocked.contains(p.author?.uid)) p,
+        ];
+    return (shown(results[0]), shown(results[1]));
   }
 
   Future<void> _refresh() async {

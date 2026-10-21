@@ -3,12 +3,14 @@ import 'dart:typed_data';
 
 import 'package:athlete_app/models/account.dart';
 import 'package:athlete_app/models/media.dart';
+import 'package:athlete_app/models/moderation.dart';
 import 'package:athlete_app/models/post.dart';
 import 'package:athlete_app/models/sign_up_data.dart';
 import 'package:athlete_app/services/auth_service.dart';
 import 'package:athlete_app/services/feed_repository.dart';
 import 'package:athlete_app/services/media_repository.dart';
 import 'package:athlete_app/services/profile_repository.dart';
+import 'package:athlete_app/services/safety_repository.dart';
 
 /// In-memory stand-in for Firebase Auth.
 class FakeAuthService implements AuthService {
@@ -41,8 +43,11 @@ class FakeAuthService implements AuthService {
     }
     final uid = _newUid();
     _emailAccounts[email] = (uid: uid, password: password);
-    return _current =
-        AuthUser(uid: uid, method: SignUpMethod.email, email: email);
+    return _current = AuthUser(
+      uid: uid,
+      method: SignUpMethod.email,
+      email: email,
+    );
   }
 
   @override
@@ -51,8 +56,11 @@ class FakeAuthService implements AuthService {
     if (account == null || account.password != password) {
       throw const AuthException('Email or password is incorrect');
     }
-    return _current =
-        AuthUser(uid: account.uid, method: SignUpMethod.email, email: email);
+    return _current = AuthUser(
+      uid: account.uid,
+      method: SignUpMethod.email,
+      email: email,
+    );
   }
 
   @override
@@ -64,8 +72,11 @@ class FakeAuthService implements AuthService {
       throw const AuthException("That code isn't right. Try again.");
     }
     final uid = _phoneAccounts.putIfAbsent(verificationId, _newUid);
-    return _current =
-        AuthUser(uid: uid, method: SignUpMethod.phone, phone: verificationId);
+    return _current = AuthUser(
+      uid: uid,
+      method: SignUpMethod.phone,
+      phone: verificationId,
+    );
   }
 
   @override
@@ -126,12 +137,43 @@ class InMemoryProfileRepository implements ProfileRepository {
     final viewer = accounts[_auth.currentUser?.uid];
     for (final a in accounts.values) {
       if (a.athleteId != athleteId) continue;
-      final hidden = a.profile.isMinorOn(now) &&
+      final hidden =
+          a.profile.isMinorOn(now) &&
           a != viewer &&
           !(viewer?.profile.isMinorOn(now) ?? false);
       return hidden ? null : a;
     }
     return null;
+  }
+
+  @override
+  Future<List<Account>> searchByName(String query) async {
+    final now = DateTime.now();
+    final words = searchWords(query);
+    if (words.isEmpty) return [];
+    return [
+      for (final a in accounts.values)
+        if (a.profile.findable &&
+            a.profile.canBeFindableOn(now) &&
+            matchesName(a.profile.name, words))
+          a,
+    ].take(20).toList();
+  }
+
+  @override
+  Future<List<Account>> browse({
+    String? sport,
+    AthleteCategory? category,
+  }) async {
+    final now = DateTime.now();
+    return [
+      for (final a in accounts.values)
+        if (a.profile.findable &&
+            a.profile.canBeFindableOn(now) &&
+            (sport == null || a.profile.sport == sport) &&
+            (category == null || a.profile.category == category))
+          a,
+    ]..sort((a, b) => a.profile.name.compareTo(b.profile.name));
   }
 
   @override
@@ -158,9 +200,29 @@ class InMemoryFeedRepository implements FeedRepository {
 
   Post _fresh(String id) => posts.firstWhere((p) => p.id == id);
 
+  /// Feed queries only return visible posts, like the Firestore rules.
+  Iterable<Post> get _visible =>
+      posts.where((p) => p.status == ContentStatus.visible);
+
+  List<Reply> allReplies(String postId) => _replies[postId] ??= [];
+
+  /// Changes a post's or reply's status, as a moderator or reports would.
+  void setStatus(String path, ContentStatus status, {int? reportCount}) {
+    final parts = path.split('/');
+    if (parts.length == 2) {
+      _replace(
+        _fresh(parts[1]).copyWith(status: status, reportCount: reportCount),
+      );
+    } else {
+      final list = allReplies(parts[1]);
+      final i = list.indexWhere((r) => r.id == parts[3]);
+      list[i] = list[i].copyWith(status: status, reportCount: reportCount);
+    }
+  }
+
   @override
   Future<List<Post>> latest(Set<Topic> topics, {int limit = 30}) async =>
-      (posts.where((p) => topics.contains(p.topic)).toList()
+      (_visible.where((p) => topics.contains(p.topic)).toList()
             ..sort((a, b) => b.createdAt.compareTo(a.createdAt)))
           .take(limit)
           .toList();
@@ -182,6 +244,8 @@ class InMemoryFeedRepository implements FeedRepository {
 
   @override
   Future<Post> createPost(Account author, NewPost draft) async {
+    final hold = FeedRules.holdReasonFor(author, draft);
+    final minor = FeedRules.isMinor(author);
     final post = Post(
       id: _id(),
       type: draft.type,
@@ -197,6 +261,10 @@ class InMemoryFeedRepository implements FeedRepository {
       media: draft.media,
       respondsToId: draft.respondingTo?.id,
       respondsToText: draft.respondingTo?.text,
+      status: hold == null ? ContentStatus.visible : ContentStatus.held,
+      holdReason: hold,
+      adultRepliesAllowed: minor && draft.adultRepliesAllowed,
+      tags: draft.tags,
     );
     posts.add(post);
     _authors[post.id] = author.uid;
@@ -208,25 +276,65 @@ class InMemoryFeedRepository implements FeedRepository {
   }
 
   @override
+  Future<Post> editPost(Account author, Post post,
+      {required String text, required List<String> tags}) async {
+    if (_authors[post.id] != author.uid) throw StateError('permission-denied');
+    final hold = FeedRules.editHoldReasonFor(_fresh(post.id), text, tags);
+    final edited = _fresh(post.id).copyWith(
+      text: text.trim(),
+      tags: tags,
+      editedAt: DateTime.now(),
+      status: hold == null ? null : ContentStatus.held,
+      holdReason: hold,
+    );
+    _replace(edited);
+    return edited;
+  }
+
+  @override
+  Future<void> deletePost(Account author, Post post) async {
+    if (_authors[post.id] != author.uid) throw StateError('permission-denied');
+    posts.removeWhere((p) => p.id == post.id);
+    _authors.remove(post.id);
+  }
+
+  @override
+  Future<List<Post>> withTag(String tag, {int limit = 30}) async =>
+      (_visible.where((p) => p.tags.contains(tag)).toList()
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt)))
+          .take(limit)
+          .toList();
+
+  @override
   Future<List<Post>> responsesTo(String postId) async =>
-      posts.where((p) => p.respondsToId == postId).toList();
+      _visible.where((p) => p.respondsToId == postId).toList();
 
   @override
   Future<List<Post>> postsBy(Account owner) async => [
-        for (final p in posts.reversed)
-          if (_authors[p.id] == owner.uid) p,
-      ];
+    for (final p in posts.reversed)
+      if (_authors[p.id] == owner.uid) p,
+  ];
 
   @override
   Future<List<Post>> postsInJourney(String journeyId) async =>
-      posts.where((p) => p.journeyId == journeyId).toList();
+      _visible.where((p) => p.journeyId == journeyId).toList();
 
   @override
-  Future<List<Reply>> replies(String postId) async => [...?_replies[postId]];
+  Future<List<Reply>> replies(String postId, {Account? viewer}) async => [
+    for (final r in allReplies(postId))
+      if (r.status == ContentStatus.visible ||
+          (r.status == ContentStatus.held && r.author.uid == viewer?.uid))
+        r,
+  ];
 
   @override
-  Future<Reply> addReply(Account author, Post post, String text,
-      {Reply? parent}) async {
+  Future<Reply> addReply(
+    Account author,
+    Post post,
+    String text, {
+    Reply? parent,
+  }) async {
+    final hold = FeedRules.replyHoldReasonFor(author, post, text);
     final reply = Reply(
       id: _id(),
       postId: post.id,
@@ -235,6 +343,8 @@ class InMemoryFeedRepository implements FeedRepository {
       minorAuthor: FeedRules.isMinor(author),
       text: text.trim(),
       createdAt: DateTime.now(),
+      status: hold == null ? ContentStatus.visible : ContentStatus.held,
+      holdReason: hold,
     );
     (_replies[post.id] ??= []).add(reply);
     final fresh = _fresh(post.id);
@@ -255,11 +365,13 @@ class InMemoryFeedRepository implements FeedRepository {
 
   @override
   Future<Set<String>> myHelpful(
-          String postId, List<Reply> replies, Account viewer) async =>
-      {
-        for (final r in replies)
-          if (_helpful[r.id]?.contains(viewer.uid) ?? false) r.id,
-      };
+    String postId,
+    List<Reply> replies,
+    Account viewer,
+  ) async => {
+    for (final r in replies)
+      if (_helpful[r.id]?.contains(viewer.uid) ?? false) r.id,
+  };
 
   @override
   Future<void> setHelpful(Reply reply, Account viewer, bool on) async {
@@ -344,4 +456,161 @@ class FakeMediaRepository implements MediaRepository {
 
   @override
   Future<File> videoFile(String path) async => throw UnimplementedError();
+}
+
+/// In-memory reporting and blocking, working on an [InMemoryFeedRepository].
+class FakeSafetyRepository implements SafetyRepository {
+  FakeSafetyRepository(this.feed);
+
+  final InMemoryFeedRepository feed;
+  final reports = <String, Report>{}; // reportId -> report
+  final _reportCounts = <String, int>{}; // targetPath -> count
+  final _blocked = <String, Map<String, String>>{}; // me -> uid -> name
+  final moderators = <String>{};
+  int _nextId = 0;
+
+  bool _report(
+    Account reporter,
+    String path,
+    String text,
+    ReportReason reason,
+    String details,
+  ) {
+    final id = reportId(path, reporter.uid);
+    if (reports.containsKey(id)) return false;
+    reports[id] = Report(
+      id: 'r${_nextId++}',
+      reason: reason,
+      targetPath: path,
+      targetText: text,
+      details: details,
+      createdAt: DateTime.now(),
+    );
+    final count = _reportCounts[path] = (_reportCounts[path] ?? 0) + 1;
+    feed.setStatus(
+      path,
+      count >= reportsToHide ? ContentStatus.held : _statusOf(path),
+      reportCount: count,
+    );
+    return true;
+  }
+
+  ContentStatus _statusOf(String path) {
+    final parts = path.split('/');
+    if (parts.length == 2) {
+      return feed.posts.firstWhere((p) => p.id == parts[1]).status;
+    }
+    return feed.allReplies(parts[1]).firstWhere((r) => r.id == parts[3]).status;
+  }
+
+  @override
+  Future<bool> reportPost(
+    Account reporter,
+    Post post,
+    ReportReason reason, {
+    String details = '',
+  }) async => _report(reporter, 'posts/${post.id}', post.text, reason, details);
+
+  @override
+  Future<bool> reportReply(
+    Account reporter,
+    Reply reply,
+    ReportReason reason, {
+    String details = '',
+  }) async => _report(
+    reporter,
+    'posts/${reply.postId}/replies/${reply.id}',
+    reply.text,
+    reason,
+    details,
+  );
+
+  @override
+  Future<Set<String>> blockedUids(Account me) async => {
+    ...?_blocked[me.uid]?.keys,
+  };
+
+  @override
+  Future<List<BlockedMember>> blockedMembers(Account me) async => [
+    for (final e in (_blocked[me.uid] ?? const {}).entries)
+      BlockedMember(uid: e.key, name: e.value),
+  ];
+
+  @override
+  Future<void> block(Account me, Author other) async =>
+      (_blocked[me.uid] ??= {})[other.uid] = other.name;
+
+  @override
+  Future<void> unblock(Account me, String uid) async =>
+      _blocked[me.uid]?.remove(uid);
+
+  @override
+  Future<bool> isModerator(String uid) async => moderators.contains(uid);
+}
+
+/// In-memory moderation queue over the fake feed and reports.
+class FakeModerationRepository implements ModerationRepository {
+  FakeModerationRepository(this.feed, this.safety);
+
+  final InMemoryFeedRepository feed;
+  final FakeSafetyRepository safety;
+
+  @override
+  Future<List<QueueItem>> heldPosts() async => [
+    for (final p in feed.posts)
+      if (p.status == ContentStatus.held)
+        QueueItem(
+          path: 'posts/${p.id}',
+          text: p.text,
+          createdAt: p.createdAt,
+          holdReason: p.holdReason,
+          authorName: p.author?.name ?? 'Anonymous',
+          reportCount: p.reportCount,
+        ),
+  ];
+
+  @override
+  Future<List<QueueItem>> heldReplies() async => [
+    for (final p in feed.posts)
+      for (final r in feed.allReplies(p.id))
+        if (r.status == ContentStatus.held)
+          QueueItem(
+            path: 'posts/${p.id}/replies/${r.id}',
+            text: r.text,
+            createdAt: r.createdAt,
+            holdReason: r.holdReason,
+            authorName: r.author.name,
+            authorUid: r.author.uid,
+            isReply: true,
+            reportCount: r.reportCount,
+          ),
+  ];
+
+  final _resolved = <String>{};
+
+  @override
+  Future<List<Report>> openReports() async => [
+    for (final r in safety.reports.values)
+      if (!_resolved.contains(r.id)) r,
+  ];
+
+  @override
+  Future<void> approve(QueueItem item) async =>
+      feed.setStatus(item.path, ContentStatus.visible);
+
+  @override
+  Future<void> remove(QueueItem item) async =>
+      feed.setStatus(item.path, ContentStatus.removed);
+
+  @override
+  Future<void> resolveReport(
+    Report report, {
+    required bool removeContent,
+  }) async {
+    _resolved.add(report.id);
+    feed.setStatus(
+      report.targetPath,
+      removeContent ? ContentStatus.removed : ContentStatus.visible,
+    );
+  }
 }

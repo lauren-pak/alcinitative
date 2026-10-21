@@ -11,25 +11,32 @@ import '../../models/sign_up_data.dart';
 import '../../services/media_prep.dart';
 import '../../services/services.dart';
 import '../../widgets/feed_widgets.dart';
+import '../../widgets/safety_widgets.dart';
+import '../../widgets/tag_widgets.dart';
 import '../feed/capture_screen.dart';
 import 'easy_widgets.dart';
 
-enum _Step { topic, kind, write, check }
+enum _Step { topic, kind, write, tags, check }
 
 /// Easy mode posting, one question per screen: topic → share or ask →
 /// camera (video first; photo or just words also possible) → write →
 /// check and post. Advanced options use safe
 /// defaults: replies from athletes, not anonymous, no journey.
 /// Pops with the created [Post].
+///
+/// With [respondingTo] it answers another post: the topic comes from that
+/// post, so it goes straight to the camera, then words, then check.
 class EasyComposeScreen extends StatefulWidget {
   const EasyComposeScreen({
     super.key,
     required this.account,
     this.initialVideo,
     this.initialPhotos = const [],
+    this.respondingTo,
   });
 
   final Account account;
+  final Post? respondingTo;
 
   /// Captured on the camera screen, already cleaned.
   final PreparedVideo? initialVideo;
@@ -52,9 +59,12 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
   Account get _account => widget.account;
 
   /// General public members can only ask, so they skip that question.
-  List<_Step> get _steps => FeedRules.postTypesFor(_account).length > 1
+  /// Answers to a post skip both questions.
+  List<_Step> get _steps => widget.respondingTo != null
+      ? const [_Step.write, _Step.tags, _Step.check]
+      : FeedRules.postTypesFor(_account).length > 1
       ? _Step.values
-      : const [_Step.topic, _Step.write, _Step.check];
+      : const [_Step.topic, _Step.write, _Step.tags, _Step.check];
 
   int get _index => _steps.indexOf(_step);
 
@@ -64,6 +74,18 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
     _draft.type = FeedRules.postTypesFor(_account).first;
     _video = widget.initialVideo;
     _photos.addAll(widget.initialPhotos);
+    if (widget.respondingTo case final target?) {
+      _draft
+        ..respondingTo = target
+        ..topic = target.topic;
+      _step = _Step.write;
+      // Video first, as for any new post. Closing it leaves just words.
+      if (!_hasMedia) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _openCamera();
+        });
+      }
+    }
   }
 
   @override
@@ -132,6 +154,11 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
   }
 
   Future<void> _post() async {
+    if (FeedRules.flagged(_text.text, _draft.tags) &&
+        !await confirmFlaggedPost(context)) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => _working = true);
     try {
       _draft
@@ -159,6 +186,7 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
       _Step.topic => _draft.topic != null,
       _Step.kind => true,
       _Step.write => _text.text.trim().length >= (_hasMedia ? 1 : 3),
+      _Step.tags => true,
       _Step.check => !_working,
     };
 
@@ -181,6 +209,7 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
                       _Step.topic => _topicStep(textTheme),
                       _Step.kind => _kindStep(textTheme),
                       _Step.write => _writeStep(textTheme),
+                      _Step.tags => _tagsStep(textTheme),
                       _Step.check => _checkStep(textTheme),
                     },
                   ],
@@ -206,7 +235,6 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
   }
 
   Widget _topicStep(TextTheme textTheme) {
-    final blocked = FeedRules.topicBlockedFor(_account, Topic.nutrition);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -225,17 +253,18 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
                 icon: topicIcon(topic),
                 label: easyTopicLabel(topic),
                 selected: _draft.topic == topic,
-                onTap: FeedRules.topicBlockedFor(_account, topic) != null
-                    ? null
-                    : () => setState(() => _draft.topic = topic),
+                onTap: () => setState(() => _draft.topic = topic),
               ),
           ],
         ),
-        if (blocked != null) ...[
+        if (_draft.topic != null &&
+            FeedRules.topicReviewNoteFor(_account, _draft.topic!) != null) ...[
           const SizedBox(height: 12),
           const EasyNote(
-            text: 'Posts about food from under-18s are not ready yet.',
-            icon: Icons.lock_outline,
+            text:
+                'A helper will check your post about food before others '
+                'see it.',
+            icon: Icons.verified_user_outlined,
           ),
         ],
       ],
@@ -279,18 +308,36 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
 
   Widget _writeStep(TextTheme textTheme) {
     final asking = _draft.type == PostType.question;
+    final target = widget.respondingTo;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (target != null) ...[
+          _AnsweringNote(post: target),
+          const SizedBox(height: 16),
+        ],
         Text(
           _video != null
               ? 'Say something about your video'
+              : target != null
+              ? 'Write your answer'
               : asking
               ? 'Write your question'
               : 'Write your story',
           style: textTheme.headlineSmall,
         ),
         const SizedBox(height: 16),
+        if (target != null && !_hasMedia) ...[
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _working ? null : _openCamera,
+              icon: const Icon(Icons.videocam_outlined),
+              label: const Text('Record a video'),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         if (_video case final video?) ...[
           _VideoThumb(video: video),
           const SizedBox(height: 8),
@@ -346,6 +393,57 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
     );
   }
 
+  /// Easy tag ideas for each topic.
+  static const _tagIdeas = {
+    Topic.injury: ['knee', 'ankle', 'shoulder', 'rehab', 'recovery'],
+    Topic.training: ['strength', 'running', 'stretching', 'teamwork', 'coach'],
+    Topic.nutrition: ['water', 'breakfast', 'snacks', 'energy', 'raceday'],
+    Topic.competition: ['nerves', 'medal', 'warmup', 'teamwork', 'travel'],
+  };
+
+  void _toggleTag(String tag) => setState(() {
+    if (_draft.tags.contains(tag)) {
+      _draft.tags = [..._draft.tags]..remove(tag);
+    } else if (_draft.tags.length < maxTags) {
+      _draft.tags = [..._draft.tags, tag];
+    }
+  });
+
+  Widget _tagsStep(TextTheme textTheme) {
+    final ideas = _tagIdeas[_draft.topic] ?? const <String>[];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Add tags?', style: textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          'Tags help other athletes find your post. You can skip this.',
+          style: textTheme.bodyLarge,
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final tag in {...ideas, ..._draft.tags})
+              FilterChip(
+                label: Text('#$tag'),
+                selected: _draft.tags.contains(tag),
+                onSelected: (_) => _toggleTag(tag),
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        Text('Or write your own', style: textTheme.titleMedium),
+        const SizedBox(height: 8),
+        TagEditor(
+          tags: _draft.tags,
+          onChanged: (tags) => setState(() => _draft.tags = tags),
+        ),
+      ],
+    );
+  }
+
   Widget _checkStep(TextTheme textTheme) {
     final topic = _draft.topic!;
     return Column(
@@ -353,18 +451,29 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
       children: [
         Text('Is this right?', style: textTheme.headlineSmall),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Icon(topicIcon(topic), size: 32),
-            const SizedBox(width: 8),
-            Text(easyTopicLabel(topic), style: textTheme.titleMedium),
-            const SizedBox(width: 16),
-            Text(
-              _draft.type == PostType.question ? '❓ Question' : '📖 Story',
-              style: textTheme.titleMedium,
+        if (widget.respondingTo case final target?) ...[
+          _AnsweringNote(post: target),
+          const SizedBox(height: 12),
+          if (FeedRules.holdReasonFor(_account, _draft) != null) ...[
+            const EasyNote(
+              text: 'A helper will check your post before others see it.',
+              icon: Icons.verified_user_outlined,
             ),
+            const SizedBox(height: 12),
           ],
-        ),
+        ] else
+          Row(
+            children: [
+              Icon(topicIcon(topic), size: 32),
+              const SizedBox(width: 8),
+              Text(easyTopicLabel(topic), style: textTheme.titleMedium),
+              const SizedBox(width: 16),
+              Text(
+                _draft.type == PostType.question ? '❓ Question' : '📖 Story',
+                style: textTheme.titleMedium,
+              ),
+            ],
+          ),
         const SizedBox(height: 16),
         Container(
           width: double.infinity,
@@ -382,6 +491,10 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
         if (_photos.isNotEmpty) ...[
           const SizedBox(height: 12),
           _PhotoRow(photos: _photos),
+        ],
+        if (_draft.tags.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          TagChips(tags: _draft.tags),
         ],
         const SizedBox(height: 16),
         const EasyNote(
@@ -457,6 +570,42 @@ class _VideoThumb extends StatelessWidget {
             radius: 30,
             backgroundColor: Colors.black54,
             child: Icon(Icons.videocam, color: Colors.white, size: 32),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "You are answering Sam: …" at the top of an answer.
+class _AnsweringNote extends StatelessWidget {
+  const _AnsweringNote({required this.post});
+
+  final Post post;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '💬 You are answering ${post.authorName}',
+            style: textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            post.text,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: textTheme.bodyLarge,
           ),
         ],
       ),
