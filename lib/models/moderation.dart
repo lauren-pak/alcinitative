@@ -3,7 +3,6 @@
 /// `firestore.rules`, which enforces the same rules on the server.
 library;
 
-
 /// Whether a post or reply can be seen by members.
 enum ContentStatus {
   /// In the feed for everyone.
@@ -22,7 +21,8 @@ enum HoldReason {
   minorNutrition('Under-18 nutrition post'),
   minorVideo('Under-18 video'),
   adultReplyToMinor('Adult reply to an under-18'),
-  reports('Reported by members');
+  reports('Reported by members'),
+  newQuestion('New "Ask an athlete" question');
 
   const HoldReason(this.label);
   final String label;
@@ -49,7 +49,8 @@ enum ReportReason {
 ///
 /// **Must stay identical** to the pattern in `flagged()` in `firestore.rules`
 /// (RE2).
-const flaggedWordsPattern = r'(?s).*('
+const flaggedWordsPattern =
+    r'(?s).*('
     r'purg|starv|laxative|diet pill|skip(ping)? meals|not eating|stop(ped)? eating|'
     r'throw(ing)? up|make myself sick|cut(ting)? weight fast|weight cut|'
     r'self.?harm|cutting myself|hurt myself|kill myself|suicid|want to die|end it all'

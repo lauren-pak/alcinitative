@@ -86,18 +86,22 @@ class _ReportSheetState extends State<_ReportSheet> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final isNew = await widget.onReport(reason, _details.text);
-      messenger.showSnackBar(SnackBar(
-        content: Text(isNew
-            ? 'Thanks for telling us. A moderator will look at it.'
-            : "You've already reported this. A moderator will look at it."),
-      ));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            isNew
+                ? 'Thanks for telling us. A moderator will look at it.'
+                : "You've already reported this. A moderator will look at it.",
+          ),
+        ),
+      );
       if (mounted) Navigator.of(context).pop(reason);
     } catch (_) {
       if (!mounted) return;
       setState(() => _sending = false);
-      messenger.showSnackBar(const SnackBar(
-        content: Text("Couldn't send your report. Try again."),
-      ));
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Couldn't send your report. Try again.")),
+      );
     }
   }
 
@@ -106,7 +110,11 @@ class _ReportSheetState extends State<_ReportSheet> {
     final textTheme = Theme.of(context).textTheme;
     return Padding(
       padding: EdgeInsets.fromLTRB(
-          24, 0, 24, 24 + MediaQuery.viewInsetsOf(context).bottom),
+        24,
+        0,
+        24,
+        24 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -201,15 +209,18 @@ class HeldBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.hourglass_top, size: 18, color: scheme.onSecondaryContainer),
+          Icon(
+            Icons.hourglass_top,
+            size: 18,
+            color: scheme.onSecondaryContainer,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Waiting for a moderator to check it. Only you can see it for now.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: scheme.onSecondaryContainer),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSecondaryContainer,
+              ),
             ),
           ),
         ],

@@ -63,9 +63,11 @@ class _QueueListState extends State<_QueueList> {
           ? await Services.moderation.approve(item)
           : await Services.moderation.remove(item);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(approve ? 'Approved: now visible.' : 'Removed.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(approve ? 'Approved: now visible.' : 'Removed.'),
+        ),
+      );
       await _refresh();
     } catch (_) {
       if (mounted) {
@@ -97,7 +99,8 @@ class _QueueListState extends State<_QueueList> {
             children: [
               for (final item in items)
                 _ReviewCard(
-                  label: item.holdReason?.label ??
+                  label:
+                      item.holdReason?.label ??
                       (item.reportCount >= reportsToHide
                           ? HoldReason.reports.label
                           : 'Held'),
@@ -118,12 +121,12 @@ class _QueueListState extends State<_QueueList> {
   }
 
   Widget _message(String text) => RefreshIndicator(
-        onRefresh: _refresh,
-        child: ListView(
-          padding: const EdgeInsets.all(32),
-          children: [Text(text, textAlign: TextAlign.center)],
-        ),
-      );
+    onRefresh: _refresh,
+    child: ListView(
+      padding: const EdgeInsets.all(32),
+      children: [Text(text, textAlign: TextAlign.center)],
+    ),
+  );
 }
 
 class _ReportList extends StatefulWidget {
@@ -148,9 +151,13 @@ class _ReportListState extends State<_ReportList> {
     try {
       await Services.moderation.resolveReport(report, removeContent: remove);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(remove ? 'Removed and report closed.' : 'Kept. Report closed.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            remove ? 'Removed and report closed.' : 'Kept. Report closed.',
+          ),
+        ),
+      );
       await _refresh();
     } catch (_) {
       if (mounted) {
@@ -181,11 +188,15 @@ class _ReportListState extends State<_ReportList> {
               if (reports.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(32),
-                  child: Text('No open reports. 🎉', textAlign: TextAlign.center),
+                  child: Text(
+                    'No open reports. 🎉',
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               for (final report in reports)
                 _ReviewCard(
-                  label: '${report.reason.label} · '
+                  label:
+                      '${report.reason.label} · '
                       '${report.isReply ? 'reply' : 'post'}',
                   author: null,
                   text: report.targetText,
@@ -259,8 +270,10 @@ class _ReviewCard extends StatelessWidget {
             ],
             if (reports > 0) ...[
               const SizedBox(height: 4),
-              Text('$reports report${reports == 1 ? '' : 's'}',
-                  style: textTheme.bodySmall),
+              Text(
+                '$reports report${reports == 1 ? '' : 's'}',
+                style: textTheme.bodySmall,
+              ),
             ],
             const SizedBox(height: 8),
             Row(

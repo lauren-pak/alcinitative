@@ -8,6 +8,7 @@ class Account {
     required this.athleteId,
     required this.profile,
     required this.joinedAt,
+    this.verified = false,
   });
 
   /// Firebase Auth user ID.
@@ -17,6 +18,11 @@ class Account {
   final String athleteId;
   final SignUpData profile;
   final DateTime joinedAt;
+
+  /// Verified by a moderator or organiser as a national, Paralympic or
+  /// Special Olympics athlete (`verifiedAthletes/{uid}`). Only verified
+  /// athletes share spotlights and answer "Ask an athlete" questions.
+  bool verified;
 }
 
 // No 0/O or 1/I, so IDs are easy to read aloud and copy.
@@ -45,21 +51,22 @@ String normaliseAthleteId(String input) {
 
 /// Lowercase words of a name or search, e.g. "Sam Taylor" → [sam, taylor].
 List<String> searchWords(String text) => [
-      for (final w in text.toLowerCase().split(RegExp(r'[^a-z0-9]+')))
-        if (w.isNotEmpty) w,
-    ];
+  for (final w in text.toLowerCase().split(RegExp(r'[^a-z0-9]+')))
+    if (w.isNotEmpty) w,
+];
 
 /// Every prefix of every word in [name] (from 1 letter, up to 15), so a
 /// search for "tay" finds "Sam Taylor". Stored on findable ID cards only.
 List<String> nameSearchKeys(String name) => {
-      for (final w in searchWords(name))
-        for (var i = 1; i <= w.length && i <= 15; i++) w.substring(0, i),
-    }.take(60).toList();
+  for (final w in searchWords(name))
+    for (var i = 1; i <= w.length && i <= 15; i++) w.substring(0, i),
+}.take(60).toList();
 
 /// Whether every search word starts one of the name's words.
 bool matchesName(String name, List<String> searchWordList) {
   final words = searchWords(name);
   return searchWordList.every(
-    (s) => words.any((w) => w.startsWith(s.length > 15 ? s.substring(0, 15) : s)),
+    (s) =>
+        words.any((w) => w.startsWith(s.length > 15 ? s.substring(0, 15) : s)),
   );
 }

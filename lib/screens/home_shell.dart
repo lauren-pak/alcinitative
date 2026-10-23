@@ -3,17 +3,19 @@ import 'package:flutter/material.dart';
 import '../models/account.dart';
 import '../models/display_mode.dart';
 import '../models/post.dart';
-import '../models/sign_up_data.dart';
-import 'easy/easy_home_screen.dart';
 import 'easy/easy_compose_screen.dart';
+import 'easy/easy_home_screen.dart';
+import 'events/events_screen.dart';
 import 'feed/capture_screen.dart';
-import 'feed/feed_screen.dart';
+import 'feed/compose_post_screen.dart';
+import 'feed/huddle_screen.dart';
 import 'profile/profile_screen.dart';
 
-/// Signed-in home. Bottom bar: Feed · New post · Profile ("Home · Post · Me"
-/// in Easy mode). "New post" opens the composer rather than a tab. New
-/// members land on their profile (with their ID card) first; returning
-/// members on the feed. Follows the member's saved [DisplayMode].
+/// Signed-in home. Bottom bar: Events · Huddle · Profile ("Me" in Easy
+/// mode). Events, the in-person meetups, is the main tab; Huddle is where
+/// athletes share spotlights and answer questions, and posting starts from
+/// there. New members land on their profile (with their ID card) first.
+/// Follows the member's saved [DisplayMode].
 class HomeShell extends StatefulWidget {
   const HomeShell({
     super.key,
@@ -28,15 +30,13 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-enum _Tab { feed, profile }
+enum _Tab { events, huddle, profile }
 
 class _HomeShellState extends State<HomeShell> {
-  late _Tab _tab = widget.isNewAccount ? _Tab.profile : _Tab.feed;
+  late _Tab _tab = widget.isNewAccount ? _Tab.profile : _Tab.events;
 
-  /// Bumped after posting so the feed and profile reload.
+  /// Bumped after posting so Huddle and the profile reload.
   int _version = 0;
-
-  bool get _isPublic => widget.account.profile.role == UserRole.public;
 
   @override
   void initState() {
@@ -48,25 +48,35 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
-  Future<void> _compose() async {
+  /// Standard: a spotlight starts at the camera (video first); a question
+  /// opens the composer. Easy: the step-by-step guide, which asks which.
+  /// [prompt]: answering this week's Huddle question.
+  Future<void> _compose(PostType type, {WeeklyPrompt? prompt}) async {
     final created = await Navigator.of(context).push<Post>(
-      // Standard: straight to the camera (video first). Easy: topic and
-      // share-or-ask first, then the camera.
       MaterialPageRoute(
         builder: (_) => isEasyMode
-            ? EasyComposeScreen(account: widget.account)
-            : CaptureScreen(account: widget.account),
+            ? EasyComposeScreen(account: widget.account, prompt: prompt)
+            : type == PostType.experience
+            ? CaptureScreen(account: widget.account, prompt: prompt)
+            : ComposePostScreen(
+                account: widget.account,
+                initialType: PostType.question,
+              ),
       ),
     );
     if (created == null || !mounted) return;
     setState(() => _version++);
     if (created.isHeld) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(isEasyMode
-            ? 'Thank you! A helper will check your post before others see it.'
-            : 'Thanks! Your post will appear once a moderator has checked it. '
-                'You can see it on your profile.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isEasyMode
+                ? 'Thank you! A helper will check your post before others see it.'
+                : 'Thanks! Your post will appear once a moderator has checked it. '
+                      'You can see it on your profile.',
+          ),
+        ),
+      );
     }
   }
 
@@ -83,15 +93,22 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(
         index: _tab.index,
         children: [
+          EventsScreen(account: widget.account),
           if (easy)
             EasyHomeScreen(
               key: ValueKey('easy-home-$_version'),
               account: widget.account,
+              onCompose: () => _compose(PostType.experience),
+              onAnswerPrompt: (prompt) =>
+                  _compose(PostType.experience, prompt: prompt),
             )
           else
-            FeedScreen(
-              key: ValueKey('feed-$_version'),
+            HuddleScreen(
+              key: ValueKey('huddle-$_version'),
               account: widget.account,
+              onCompose: _compose,
+              onAnswerPrompt: (prompt) =>
+                  _compose(PostType.experience, prompt: prompt),
             ),
           ProfileScreen(
             key: ValueKey('profile-$_version'),
@@ -101,25 +118,18 @@ class _HomeShellState extends State<HomeShell> {
         ],
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab == _Tab.feed ? 0 : 2,
-        onDestinationSelected: (i) {
-          if (i == 1) {
-            _compose();
-          } else {
-            setState(() => _tab = i == 0 ? _Tab.feed : _Tab.profile);
-          }
-        },
+        selectedIndex: _tab.index,
+        onDestinationSelected: (i) => setState(() => _tab = _Tab.values[i]),
         destinations: [
-          NavigationDestination(
-            icon: Icon(easy ? Icons.home_outlined : Icons.forum_outlined),
-            selectedIcon: Icon(easy ? Icons.home : Icons.forum),
-            label: easy ? 'Home' : 'Feed',
+          const NavigationDestination(
+            icon: Icon(Icons.event_outlined),
+            selectedIcon: Icon(Icons.event),
+            label: 'Events',
           ),
-          NavigationDestination(
-            icon: Icon(_isPublic ? Icons.help_outline : Icons.add_box_outlined),
-            label: easy
-                ? (_isPublic ? 'Ask' : 'Post')
-                : (_isPublic ? 'Ask' : 'New post'),
+          const NavigationDestination(
+            icon: Icon(Icons.forum_outlined),
+            selectedIcon: Icon(Icons.forum),
+            label: 'Huddle',
           ),
           NavigationDestination(
             icon: const Icon(Icons.person_outline),

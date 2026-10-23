@@ -9,7 +9,7 @@ import 'safety_repository.dart';
 /// moderation section of `firestore.rules`.
 class FirestoreSafetyRepository implements SafetyRepository {
   FirestoreSafetyRepository({FirebaseFirestore? db})
-      : _db = db ?? FirebaseFirestore.instance;
+    : _db = db ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _db;
 
@@ -19,25 +19,36 @@ class FirestoreSafetyRepository implements SafetyRepository {
       _db.collection('users').doc(uid).collection('contributions');
 
   @override
-  Future<bool> reportPost(Account reporter, Post post, ReportReason reason,
-          {String details = ''}) =>
-      _report(reporter, _db.collection('posts').doc(post.id), post.text,
-          reason, details);
+  Future<bool> reportPost(
+    Account reporter,
+    Post post,
+    ReportReason reason, {
+    String details = '',
+  }) => _report(
+    reporter,
+    _db.collection('posts').doc(post.id),
+    post.text,
+    reason,
+    details,
+  );
 
   @override
-  Future<bool> reportReply(Account reporter, Reply reply, ReportReason reason,
-          {String details = ''}) =>
-      _report(
-        reporter,
-        _db
-            .collection('posts')
-            .doc(reply.postId)
-            .collection('replies')
-            .doc(reply.id),
-        reply.text,
-        reason,
-        details,
-      );
+  Future<bool> reportReply(
+    Account reporter,
+    Reply reply,
+    ReportReason reason, {
+    String details = '',
+  }) => _report(
+    reporter,
+    _db
+        .collection('posts')
+        .doc(reply.postId)
+        .collection('replies')
+        .doc(reply.id),
+    reply.text,
+    reason,
+    details,
+  );
 
   Future<bool> _report(
     Account reporter,
@@ -46,8 +57,9 @@ class FirestoreSafetyRepository implements SafetyRepository {
     ReportReason reason,
     String details,
   ) {
-    final report =
-        _db.collection('reports').doc(reportId(target.path, reporter.uid));
+    final report = _db
+        .collection('reports')
+        .doc(reportId(target.path, reporter.uid));
     return _db.runTransaction<bool>((tx) async {
       if ((await tx.get(report)).exists) return false;
       final data = (await tx.get(target)).data() ?? const {};
@@ -76,20 +88,24 @@ class FirestoreSafetyRepository implements SafetyRepository {
   }
 
   @override
-  Future<Set<String>> blockedUids(Account me) async =>
-      {for (final d in (await _blocked(me.uid).get()).docs) d.id};
+  Future<Set<String>> blockedUids(Account me) async => {
+    for (final d in (await _blocked(me.uid).get()).docs) d.id,
+  };
 
   @override
   Future<List<BlockedMember>> blockedMembers(Account me) async => [
-        for (final d in (await _blocked(me.uid).get()).docs)
-          BlockedMember(uid: d.id, name: d.data()['name'] as String? ?? ''),
-      ];
+    for (final d in (await _blocked(me.uid).get()).docs)
+      BlockedMember(uid: d.id, name: d.data()['name'] as String? ?? ''),
+  ];
 
   @override
   Future<void> block(Account me, Author other) async {
     final doc = _blocked(me.uid).doc(other.uid);
     final batch = _db.batch()
-      ..set(doc, {'name': other.name, 'createdAt': FieldValue.serverTimestamp()})
+      ..set(doc, {
+        'name': other.name,
+        'createdAt': FieldValue.serverTimestamp(),
+      })
       ..set(_contributions(me.uid).doc(), {'path': doc.path});
     await batch.commit();
   }
@@ -111,7 +127,7 @@ class FirestoreSafetyRepository implements SafetyRepository {
 /// The moderator queue in Firestore.
 class FirestoreModerationRepository implements ModerationRepository {
   FirestoreModerationRepository({FirebaseFirestore? db})
-      : _db = db ?? FirebaseFirestore.instance;
+    : _db = db ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _db;
 
@@ -148,7 +164,8 @@ class FirestoreModerationRepository implements ModerationRepository {
             text: d['text'] as String? ?? '',
             createdAt: _date(d['createdAt']),
             holdReason: _reason(d['holdReason']),
-            authorName: d['authorName'] as String? ??
+            authorName:
+                d['authorName'] as String? ??
                 (d['anonymous'] == true ? 'Anonymous post' : null),
             authorUid: uid,
             reportCount: (d['reportCount'] as num?)?.toInt() ?? 0,
@@ -205,8 +222,9 @@ class FirestoreModerationRepository implements ModerationRepository {
   Future<void> _setStatus(String path, ContentStatus status) =>
       _db.doc(path).update({
         'status': status.name,
-        'holdReason':
-            status == ContentStatus.visible ? FieldValue.delete() : 'moderator',
+        'holdReason': status == ContentStatus.visible
+            ? FieldValue.delete()
+            : 'moderator',
       });
 
   @override
@@ -218,8 +236,10 @@ class FirestoreModerationRepository implements ModerationRepository {
       _setStatus(item.path, ContentStatus.removed);
 
   @override
-  Future<void> resolveReport(Report report,
-      {required bool removeContent}) async {
+  Future<void> resolveReport(
+    Report report, {
+    required bool removeContent,
+  }) async {
     final target = _db.doc(report.targetPath);
     await _db.runTransaction((tx) async {
       final data = (await tx.get(target)).data();

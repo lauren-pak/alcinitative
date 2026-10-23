@@ -32,13 +32,15 @@ Account _account(
     ..method = SignUpMethod.email
     ..name = name
     ..dateOfBirth = DateTime(now.year - age, 1, 1)
-    ..topics.addAll({Topic.training, Topic.injury});
+    ..topics.addAll({Topic.training, Topic.mindset});
   if (role == UserRole.athlete) {
     profile
       ..sport = 'Swimming'
       ..level = CompetitionLevel.club;
   }
   return Account(
+    // Test athletes are verified unless a test says otherwise.
+    verified: role == UserRole.athlete,
     uid: uid,
     athleteId: 'AA-${uid.toUpperCase()}',
     profile: profile,
@@ -50,7 +52,7 @@ Future<Post> _post(
   Account author, {
   String text = 'Rehab week three, knee feels stronger.',
   List<String> tags = const [],
-  Topic topic = Topic.injury,
+  Topic topic = Topic.mindset,
 }) => feed.createPost(
   author,
   NewPost()
@@ -82,6 +84,8 @@ void main() {
     Services.profiles = profiles;
     Services.feed = feed;
     Services.media = FakeMediaRepository();
+    Services.events = InMemoryEventsRepository();
+    Services.verification = FakeVerificationRepository(profiles);
     Services.safety = safety;
     Services.moderation = FakeModerationRepository(feed, safety);
   });
@@ -132,7 +136,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Training'));
+      await tester.tap(find.text('Training wins'));
       await tester.enterText(
         find.byType(TextField).first,
         'Long swim set this morning.',
@@ -189,7 +193,7 @@ void main() {
         tags: [],
       );
       expect(edited.isHeld, isTrue);
-      expect(await feed.latest({Topic.injury}), isEmpty);
+      expect(await feed.latest({Topic.mindset}), isEmpty);
     });
 
     testWidgets('edit from the post menu', (tester) async {
@@ -265,7 +269,7 @@ void main() {
 
     final response = feed.posts.last;
     expect(response.respondsToId, post.id);
-    expect(response.topic, Topic.injury);
+    expect(response.topic, Topic.mindset);
     expect(find.textContaining('Your post is up'), findsOneWidget);
   });
 

@@ -5,7 +5,9 @@ import '../../models/display_mode.dart';
 import '../../models/sign_up_data.dart';
 import '../../services/services.dart';
 import '../edit_profile_screen.dart';
+import '../verification/get_verified_screen.dart';
 import '../your_data_screen.dart';
+import '../../widgets/brand.dart';
 import 'safety_settings_screen.dart';
 
 /// Profile details, how the app looks, safety and privacy, and your data.
@@ -39,9 +41,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _account.profile.displayMode = previous;
       displayMode.value = previous;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Couldn't save that. Check your connection."),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't save that. Check your connection."),
+          ),
+        );
       }
     }
   }
@@ -60,9 +64,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
 
     Widget heading(String text) => Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-          child: Text(text, style: textTheme.titleMedium),
-        );
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+      child: Text(text, style: textTheme.titleMedium),
+    );
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -91,6 +95,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: textTheme.bodySmall,
             ),
           ),
+          if (profile.role == UserRole.athlete)
+            ListTile(
+              leading: _account.verified
+                  ? const VerifiedBadge(size: 24)
+                  : const Icon(Icons.verified_outlined),
+              title: Text(
+                _account.verified ? 'Verified athlete' : 'Get verified',
+              ),
+              subtitle: const Text(
+                'National, Paralympic and Special Olympics athletes',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _open(GetVerifiedScreen(account: _account)),
+            ),
           heading('How the app looks'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),

@@ -73,6 +73,8 @@ void main() {
     Services.safety = safety;
     Services.moderation = FakeModerationRepository(feed, safety);
     Services.media = FakeMediaRepository();
+    Services.events = InMemoryEventsRepository();
+    Services.verification = FakeVerificationRepository(profiles);
   });
 
   group('age rules', () {
@@ -257,7 +259,7 @@ void main() {
     await tester.pump();
     expect(find.text('Pick at least one topic'), findsOneWidget);
 
-    await tester.tap(find.text('Injury'));
+    await tester.tap(find.text('Mindset'));
     await tester.tap(find.text('Create account'));
     await tester.pump();
     expect(finished, isTrue);
@@ -316,9 +318,11 @@ void main() {
 
     await tester.enterText(fields.at(1), 'password123');
     await _tapButton(tester, 'Log in');
-    // Returning members land on the feed; their ID is one tab away.
-    expect(find.text('Needs an answer'), findsNothing);
-    expect(find.text('No posts yet. Be the first to share.'), findsOneWidget);
+    // Returning members land on Events; their ID is one tab away.
+    expect(
+      find.text('No events coming up yet. Check back soon!'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(find.text('Sam Taylor'), findsOneWidget);
@@ -349,9 +353,10 @@ void main() {
 
     expect(find.text('Welcome, Sam!'), findsOneWidget);
     expect(find.text('ATHLETE ID'), findsOneWidget);
-    expect(find.text(account.athleteId), findsOneWidget);
-    expect(find.text('Swimming · Club'), findsOneWidget);
-    expect(find.text('Special Olympics athlete'), findsOneWidget);
+    // On the ID card and as the profile's title.
+    expect(find.text(account.athleteId), findsWidgets);
+    expect(find.text('Swimming · Club'), findsWidgets);
+    expect(find.text('Special Olympics athlete'), findsWidgets);
     expect(find.textContaining('1998'), findsNothing);
   });
 

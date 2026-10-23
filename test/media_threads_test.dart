@@ -11,7 +11,7 @@ import 'package:athlete_app/models/post.dart';
 import 'package:athlete_app/models/sign_up_data.dart';
 import 'package:athlete_app/screens/feed/capture_screen.dart';
 import 'package:athlete_app/screens/feed/compose_post_screen.dart';
-import 'package:athlete_app/screens/feed/feed_screen.dart';
+import 'package:athlete_app/screens/feed/huddle_screen.dart';
 import 'package:athlete_app/screens/feed/post_detail_screen.dart';
 import 'package:athlete_app/screens/profile/profile_screen.dart';
 import 'package:athlete_app/services/media_prep.dart';
@@ -25,6 +25,8 @@ late FakeMediaRepository media;
 Account _account(String uid, {String name = 'Sam Taylor', int age = 25}) {
   final now = DateTime.now();
   return Account(
+    // Test athletes are verified unless a test says otherwise.
+    verified: true,
     uid: uid,
     athleteId: 'AA-$uid',
     joinedAt: now,
@@ -92,6 +94,10 @@ void main() {
     Services.safety = safety;
     Services.moderation = FakeModerationRepository(feed, safety);
     Services.media = media;
+    Services.events = InMemoryEventsRepository();
+    Services.verification = FakeVerificationRepository(
+      Services.profiles as InMemoryProfileRepository,
+    );
   });
 
   group('cleanPhoto', () {
@@ -132,9 +138,15 @@ void main() {
   testWidgets('photos show on feed cards', (tester) async {
     final photo = cleanPhoto(_photoWithLocation(width: 200, height: 100));
     final item = await media.uploadPhoto(_account('a'), photo);
-    await _post(_account('a'), withMedia: [item]);
+    feed.publish(await _post(_account('a'), withMedia: [item]));
 
-    await _pump(tester, FeedScreen(account: _account('me')));
+    await _pump(
+      tester,
+      HuddleScreen(account: _account('me'), onCompose: (_) {}),
+    );
+    // The helper posts questions, so they're under "Ask an athlete".
+    await tester.tap(find.text('Ask an athlete'));
+    await tester.pumpAndSettle();
     expect(find.byType(Image), findsWidgets);
   });
 
@@ -235,7 +247,10 @@ void main() {
         ..respondingTo = original,
     );
 
-    await _pump(tester, FeedScreen(account: _account('me')));
+    await _pump(
+      tester,
+      HuddleScreen(account: _account('me'), onCompose: (_) {}),
+    );
     expect(
       find.textContaining('In response to: "Original question here"'),
       findsOneWidget,
@@ -254,7 +269,7 @@ void main() {
     expect(find.text('My named post about pacing.'), findsOneWidget);
     expect(find.text('My anonymous post about nerves.'), findsOneWidget);
     expect(
-      find.text('Posted anonymously. Only you can see it is yours.'),
+      find.byTooltip('Posted anonymously. Only you can see it is yours.'),
       findsOneWidget,
     );
     expect(find.text('Not mine.'), findsNothing);
@@ -265,17 +280,20 @@ void main() {
   ) async {
     final me = _account('me');
     final journey = await feed.createJourney(me, 'ACL rehab 2026');
-    await _post(me, text: 'Week 1: surgery went well.', journey: journey);
-    await _post(me, text: 'Week 2: first physio session.', journey: journey);
+    feed.publish(
+      await _post(me, text: 'Week 1: surgery went well.', journey: journey),
+    );
+    feed.publish(
+      await _post(me, text: 'Week 2: first physio session.', journey: journey),
+    );
 
     await _pump(tester, ProfileScreen(account: me, isNewAccount: false));
-    await tester.tap(find.text('Journeys'));
-    await tester.pumpAndSettle();
+    // Journeys are story highlights on the profile.
     await tester.tap(find.text('ACL rehab 2026'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Part 1'), findsOneWidget);
-    expect(find.text('Part 2'), findsOneWidget);
+    expect(find.text('Chapter 1'), findsOneWidget);
+    expect(find.text('Chapter 2'), findsOneWidget);
     final week1 = tester.getTopLeft(find.text('Week 1: surgery went well.')).dy;
     final week2 = tester
         .getTopLeft(find.text('Week 2: first physio session.'))
@@ -326,7 +344,7 @@ void main() {
       await tester.tap(find.text('Write a post'));
       await tester.pumpAndSettle();
       expect(find.text('New post'), findsOneWidget);
-      expect(find.text('Your experience'), findsOneWidget);
+      expect(find.text('Your spotlight'), findsOneWidget);
     });
   });
 
@@ -352,7 +370,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Caption'), findsOneWidget);
-    await tester.tap(find.text('Training'));
+    await tester.tap(find.text('Training wins'));
     await tester.enterText(find.byType(TextField).first, 'PB!');
     await tester.tap(find.widgetWithText(FilledButton, 'Post'));
     await tester.pumpAndSettle();

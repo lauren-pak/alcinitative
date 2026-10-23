@@ -1,8 +1,10 @@
 import 'auth_service.dart';
+import 'events_repository.dart';
 import 'feed_repository.dart';
 import 'media_repository.dart';
 import 'profile_repository.dart';
 import 'safety_repository.dart';
+import 'verification_repository.dart';
 
 /// Backend services. `main.dart` sets the Firebase ones; tests set fakes.
 class Services {
@@ -12,4 +14,6 @@ class Services {
   static late MediaRepository media;
   static late SafetyRepository safety;
   static late ModerationRepository moderation;
+  static late EventsRepository events;
+  static late VerificationRepository verification;
 }

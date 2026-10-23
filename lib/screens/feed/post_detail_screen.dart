@@ -9,6 +9,7 @@ import '../../widgets/media_widgets.dart';
 import '../../widgets/safety_widgets.dart';
 import '../../widgets/tag_widgets.dart';
 import 'capture_screen.dart';
+import '../profile/journey_screen.dart';
 import 'edit_post_screen.dart';
 import 'tag_search_screen.dart';
 
@@ -97,7 +98,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   /// oldest.
   static int _byHelpfulness(Reply a, Reply b) {
     if (a.helpedAsker != b.helpedAsker) return a.helpedAsker ? -1 : 1;
-    if (a.helpfulCount != b.helpfulCount) return b.helpfulCount - a.helpfulCount;
+    if (a.helpfulCount != b.helpfulCount) {
+      return b.helpfulCount - a.helpfulCount;
+    }
     return a.createdAt.compareTo(b.createdAt);
   }
 
@@ -108,8 +111,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       await action();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(failure)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(failure)));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -117,40 +121,40 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _toggleBeenThere() => _run(() async {
-        final on = !_beenThere;
-        await Services.feed.setBeenThere(_post, widget.viewer, on);
-        setState(() {
-          _beenThere = on;
-          _post = _post.copyWith(
-            beenThereCount: _post.beenThereCount + (on ? 1 : -1),
-          );
-        });
-      }, "Couldn't save that. Try again.");
+    final on = !_beenThere;
+    await Services.feed.setBeenThere(_post, widget.viewer, on);
+    setState(() {
+      _beenThere = on;
+      _post = _post.copyWith(
+        beenThereCount: _post.beenThereCount + (on ? 1 : -1),
+      );
+    });
+  }, "Couldn't save that. Try again.");
 
   Future<void> _toggleHelpful(Reply reply) => _run(() async {
-        final on = !_myHelpful.contains(reply.id);
-        await Services.feed.setHelpful(reply, widget.viewer, on);
-        setState(() {
-          on ? _myHelpful.add(reply.id) : _myHelpful.remove(reply.id);
-          _replies = [
-            for (final r in _replies!)
-              r.id == reply.id
-                  ? r.copyWith(helpfulCount: r.helpfulCount + (on ? 1 : -1))
-                  : r,
-          ];
-        });
-      }, "Couldn't save that. Try again.");
+    final on = !_myHelpful.contains(reply.id);
+    await Services.feed.setHelpful(reply, widget.viewer, on);
+    setState(() {
+      on ? _myHelpful.add(reply.id) : _myHelpful.remove(reply.id);
+      _replies = [
+        for (final r in _replies!)
+          r.id == reply.id
+              ? r.copyWith(helpfulCount: r.helpfulCount + (on ? 1 : -1))
+              : r,
+      ];
+    });
+  }, "Couldn't save that. Try again.");
 
   Future<void> _markHelped(Reply reply) => _run(() async {
-        await Services.feed.markHelpedAsker(_post, reply);
-        setState(() {
-          _post = _post.copyWith(answered: true);
-          _replies = [
-            for (final r in _replies!)
-              r.id == reply.id ? r.copyWith(helpedAsker: true) : r,
-          ];
-        });
-      }, "Couldn't save that. Try again.");
+    await Services.feed.markHelpedAsker(_post, reply);
+    setState(() {
+      _post = _post.copyWith(answered: true);
+      _replies = [
+        for (final r in _replies!)
+          r.id == reply.id ? r.copyWith(helpedAsker: true) : r,
+      ];
+    });
+  }, "Couldn't save that. Try again.");
 
   void _startReplyTo(Reply reply) {
     setState(() => _replyingTo = reply);
@@ -164,8 +168,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       return;
     }
     await _run(() async {
-      final reply = await Services.feed
-          .addReply(widget.viewer, _post, text, parent: _replyingTo);
+      final reply = await Services.feed.addReply(
+        widget.viewer,
+        _post,
+        text,
+        parent: _replyingTo,
+      );
       if (!mounted) return;
       _replyText.clear();
       FocusScope.of(context).unfocus();
@@ -175,36 +183,48 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         _post = _post.copyWith(replyCount: _post.replyCount + 1);
       });
       if (reply.isHeld) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Thanks! Your reply will show once a moderator has '
-              'checked it.'),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Thanks! Your reply will show once a moderator has '
+              'checked it.',
+            ),
+          ),
+        );
       }
     }, "Couldn't send your reply. Try again.");
   }
 
   Future<void> _reportPost() => showReportSheet(
-        context,
-        what: 'this post',
-        onReport: (reason, details) => Services.safety
-            .reportPost(widget.viewer, _post, reason, details: details),
-      );
+    context,
+    what: 'this post',
+    onReport: (reason, details) => Services.safety.reportPost(
+      widget.viewer,
+      _post,
+      reason,
+      details: details,
+    ),
+  );
 
   Future<void> _reportReply(Reply reply) => showReportSheet(
-        context,
-        what: 'this reply',
-        onReport: (reason, details) => Services.safety
-            .reportReply(widget.viewer, reply, reason, details: details),
-      );
+    context,
+    what: 'this reply',
+    onReport: (reason, details) => Services.safety.reportReply(
+      widget.viewer,
+      reply,
+      reason,
+      details: details,
+    ),
+  );
 
   Future<void> _block(Author author) async {
     if (!await confirmBlock(context, author.name)) return;
     await _run(() async {
       await Services.safety.block(widget.viewer, author);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('You blocked ${author.name}.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('You blocked ${author.name}.')));
       if (_post.author?.uid == author.uid) {
         Navigator.of(context).pop();
       } else {
@@ -216,10 +236,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Future<void> _respondWithPost() async {
     final created = await Navigator.of(context).push<Post>(
       MaterialPageRoute(
-        builder: (_) => CaptureScreen(
-          account: widget.viewer,
-          respondingTo: _post,
-        ),
+        builder: (_) =>
+            CaptureScreen(account: widget.viewer, respondingTo: _post),
       ),
     );
     if (created != null && mounted) _load();
@@ -234,10 +252,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     if (edited == null || !mounted) return;
     setState(() => _post = edited);
     if (edited.isHeld && !widget.post.isHeld) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Saved. A moderator will check it before others '
-            'see it again.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Saved. A moderator will check it before others '
+            'see it again.',
+          ),
+        ),
+      );
     }
   }
 
@@ -246,18 +268,28 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     await _run(() async {
       await Services.feed.deletePost(widget.viewer, _post);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Post deleted.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Post deleted.')));
       Navigator.of(context).pop();
     }, "Couldn't delete it. Try again.");
   }
 
   void _searchTag(String tag) => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) =>
-              TagSearchScreen(account: widget.viewer, initialTag: tag),
-        ),
-      );
+    MaterialPageRoute(
+      builder: (_) => TagSearchScreen(account: widget.viewer, initialTag: tag),
+    ),
+  );
+
+  Future<void> _openJourney(String journeyId) async {
+    final journey = await Services.feed.getJourney(journeyId);
+    if (journey == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => JourneyScreen(journey: journey, viewer: widget.viewer),
+      ),
+    );
+  }
 
   Future<void> _openPost(Post post) async {
     await Navigator.of(context).push(
@@ -291,13 +323,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           isNested: depth > 0,
           markedHelpful: _myHelpful.contains(reply.id),
           onHelpful: _busy ? null : () => _toggleHelpful(reply),
-          onReply: FeedRules.replyBlockedFor(widget.viewer, _post,
-                      parent: reply) ==
+          onReply:
+              FeedRules.replyBlockedFor(
+                    widget.viewer,
+                    _post,
+                    parent: reply,
+                    isMine: _isMine,
+                  ) ==
                   null
               ? () => _startReplyTo(reply)
               : null,
-          onHelpedMe:
-              canMarkHelped && !_busy ? () => _markHelped(reply) : null,
+          onHelpedMe: canMarkHelped && !_busy ? () => _markHelped(reply) : null,
           onReport: () => _reportReply(reply),
           onBlock: reply.author.uid == widget.viewer.uid
               ? null
@@ -320,10 +356,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           Column(children: [...replyTree(r, 0)]),
         ),
       for (final p in _responses)
-        (
-          p.createdAt,
-          _ResponseCard(post: p, onTap: () => _openPost(p)),
-        ),
+        (p.createdAt, _ResponseCard(post: p, onTap: () => _openPost(p))),
     ];
     // Keep the helpfulness order of replies; slot responses in by time.
     final ordered = <Widget>[];
@@ -347,11 +380,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final post = _post;
-    final postReplyBlocked = FeedRules.replyBlockedFor(widget.viewer, post);
+    final postReplyBlocked = FeedRules.replyBlockedFor(
+      widget.viewer,
+      post,
+      isMine: _isMine,
+    );
     final barBlocked = _replyingTo == null
         ? postReplyBlocked
-        : FeedRules.replyBlockedFor(widget.viewer, post, parent: _replyingTo);
-    final commentCount = (_replies?.length ?? post.replyCount) +
+        : FeedRules.replyBlockedFor(
+            widget.viewer,
+            post,
+            parent: _replyingTo,
+            isMine: _isMine,
+          );
+    final commentCount =
+        (_replies?.length ?? post.replyCount) +
         (_replies == null ? post.responseCount : _responses.length);
 
     return Scaffold(
@@ -387,9 +430,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           else
             PopupMenuButton<String>(
               tooltip: 'More',
-              onSelected: (choice) => choice == 'report'
-                  ? _reportPost()
-                  : _block(post.author!),
+              onSelected: (choice) =>
+                  choice == 'report' ? _reportPost() : _block(post.author!),
               itemBuilder: (_) => [
                 const PopupMenuItem(
                   value: 'report',
@@ -429,32 +471,38 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       const SizedBox(height: 8),
                       InkWell(
                         onTap: () async {
-                          final original =
-                              await Services.feed.getPost(post.respondsToId!);
+                          final original = await Services.feed.getPost(
+                            post.respondsToId!,
+                          );
                           if (original != null && mounted) _openPost(original);
                         },
                         child: RespondsToLine(text: post.respondsToText!),
                       ),
+                    ],
+                    if (post.promptText != null) ...[
+                      const SizedBox(height: 8),
+                      PromptLine(text: post.promptText!),
                     ],
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        FeedChip(
-                          label: post.topic.label,
-                          icon: topicIcon(post.topic),
-                        ),
+                        TopicChip(topic: post.topic),
                         if (post.answered)
                           const FeedChip(
                             label: 'Answered',
                             icon: Icons.check_circle_outline,
                             emphasis: true,
                           ),
-                        if (post.journeyTitle != null)
-                          FeedChip(
-                            label: post.journeyTitle!,
-                            icon: Icons.playlist_play,
+                        if (post.journeyId != null)
+                          InkWell(
+                            onTap: () => _openJourney(post.journeyId!),
+                            borderRadius: BorderRadius.circular(8),
+                            child: FeedChip(
+                              label: '${post.journeyTitle} ›',
+                              icon: Icons.auto_stories_outlined,
+                            ),
                           ),
                       ],
                     ),
@@ -470,7 +518,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ],
                     if (post.needsAdviceBanner) ...[
                       const SizedBox(height: 12),
-                      AdviceBanner(topic: post.topic),
+                      const AdviceBanner(),
                     ],
                     const SizedBox(height: 12),
                     Wrap(
@@ -481,16 +529,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ? FilledButton.icon(
                                 onPressed: _busy ? null : _toggleBeenThere,
                                 icon: const Icon(Icons.handshake),
-                                label:
-                                    Text('Been there · ${post.beenThereCount}'),
+                                label: Text(
+                                  'Been there · ${post.beenThereCount}',
+                                ),
                               )
                             : OutlinedButton.icon(
                                 onPressed: _busy ? null : _toggleBeenThere,
                                 icon: const Icon(Icons.handshake_outlined),
-                                label:
-                                    Text('Been there · ${post.beenThereCount}'),
+                                label: Text(
+                                  'Been there · ${post.beenThereCount}',
+                                ),
                               ),
-                        if (postReplyBlocked == null)
+                        // Response posts are spotlights: verified only.
+                        if (postReplyBlocked == null &&
+                            FeedRules.spotlightBlockedFor(widget.viewer) ==
+                                null)
                           OutlinedButton.icon(
                             onPressed: _respondWithPost,
                             icon: const Icon(Icons.post_add),
@@ -499,8 +552,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       ],
                     ),
                     const Divider(height: 32),
-                    Text(commentLabel(commentCount),
-                        style: textTheme.titleMedium),
+                    Text(
+                      commentLabel(commentCount),
+                      style: textTheme.titleMedium,
+                    ),
                     if (post.type == PostType.question) ...[
                       const SizedBox(height: 8),
                       const _HelpfulNote(),
@@ -516,8 +571,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     else if (_replies!.isEmpty && _responses.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Text('No comments yet.',
-                            style: textTheme.bodyMedium),
+                        child: Text(
+                          'No comments yet.',
+                          style: textTheme.bodyMedium,
+                        ),
                       )
                     else
                       ..._thread(),
@@ -593,18 +650,21 @@ class _ResponseCard extends StatelessWidget {
               const SizedBox(height: 8),
               PostHeader(post: post),
               const SizedBox(height: 6),
-              Text(post.text,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.bodyMedium),
+              Text(
+                post.text,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodyMedium,
+              ),
               if (post.media.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 MediaPreviewGrid(media: post.media),
               ],
               const SizedBox(height: 6),
-              Text('Open post · ${commentLabel(post.commentCount)}',
-                  style: textTheme.labelMedium
-                      ?.copyWith(color: scheme.primary)),
+              Text(
+                'Open post · ${commentLabel(post.commentCount)}',
+                style: textTheme.labelMedium?.copyWith(color: scheme.primary),
+              ),
             ],
           ),
         ),
@@ -680,8 +740,10 @@ class _ReplyTile extends StatelessWidget {
                     style: textTheme.labelLarge,
                   ),
                 ),
-                Text(timeAgo(context, reply.createdAt),
-                    style: textTheme.bodySmall),
+                Text(
+                  timeAgo(context, reply.createdAt),
+                  style: textTheme.bodySmall,
+                ),
                 if (onBlock != null)
                   PopupMenuButton<String>(
                     tooltip: 'More',
@@ -690,10 +752,13 @@ class _ReplyTile extends StatelessWidget {
                     onSelected: (c) => c == 'report' ? onReport() : onBlock!(),
                     itemBuilder: (_) => [
                       const PopupMenuItem(
-                          value: 'report', child: Text('Report reply')),
+                        value: 'report',
+                        child: Text('Report reply'),
+                      ),
                       PopupMenuItem(
-                          value: 'block',
-                          child: Text('Block ${reply.author.name}')),
+                        value: 'block',
+                        child: Text('Block ${reply.author.name}'),
+                      ),
                     ],
                   ),
               ],
@@ -771,8 +836,10 @@ class _ReplyBar extends StatelessWidget {
                     Icon(Icons.reply, size: 16, color: scheme.onSurfaceVariant),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: Text('Replying to ${replyingTo!.author.name}',
-                          style: textTheme.labelMedium),
+                      child: Text(
+                        'Replying to ${replyingTo!.author.name}',
+                        style: textTheme.labelMedium,
+                      ),
                     ),
                     IconButton(
                       tooltip: 'Cancel reply',
@@ -787,11 +854,17 @@ class _ReplyBar extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Row(
                     children: [
-                      Icon(Icons.lock_outline,
-                          size: 18, color: scheme.onSurfaceVariant),
+                      Icon(
+                        Icons.lock_outline,
+                        size: 18,
+                        color: scheme.onSurfaceVariant,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(blockedReason!, style: textTheme.bodyMedium),
+                        child: Text(
+                          blockedReason!,
+                          style: textTheme.bodyMedium,
+                        ),
                       ),
                     ],
                   ),

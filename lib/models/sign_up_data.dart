@@ -1,8 +1,14 @@
 import 'display_mode.dart';
 
 enum UserRole {
-  athlete('Athlete', 'Share your experiences and give advice to other athletes.'),
-  public('General public', 'Follow athletes, learn from them and ask questions.');
+  athlete(
+    'Athlete',
+    'Share your experiences and give advice to other athletes.',
+  ),
+  public(
+    'General public',
+    'Follow athletes, learn from them and ask questions.',
+  );
 
   const UserRole(this.label, this.description);
   final String label;
@@ -28,14 +34,39 @@ enum AthleteCategory {
   final String label;
 }
 
+/// Huddle categories: positive spotlights on athletes' own experience.
+/// The old problem-focused topics (injury, nutrition, competition) were
+/// replaced; posts that still use them are read as [legacy] says.
 enum Topic {
-  injury('Injury'),
-  training('Training'),
-  nutrition('Sports nutrition'),
-  competition('Competition');
+  training('Training wins'),
+  mindset('Mindset'),
+  gameDay('Game day'),
+  teamLife('Team & life');
 
   const Topic(this.label);
   final String label;
+
+  /// Old stored names and the category they now belong to.
+  static const legacy = {
+    'injury': Topic.training,
+    'nutrition': Topic.training,
+    'competition': Topic.gameDay,
+  };
+
+  /// Every name stored in Firestore that means this category, for queries.
+  List<String> get storedNames => [
+    name,
+    for (final e in legacy.entries)
+      if (e.value == this) e.key,
+  ];
+
+  /// Reads a stored name, including old ones. Null if unknown.
+  static Topic? fromStored(Object? stored) {
+    for (final t in values) {
+      if (t.name == stored) return t;
+    }
+    return legacy[stored];
+  }
 }
 
 enum CompetitionLevel {
@@ -85,15 +116,19 @@ const adultAge = 18;
 /// Age in whole years on [today].
 int ageOn(DateTime dateOfBirth, DateTime today) {
   var age = today.year - dateOfBirth.year;
-  final hadBirthdayThisYear = today.month > dateOfBirth.month ||
+  final hadBirthdayThisYear =
+      today.month > dateOfBirth.month ||
       (today.month == dateOfBirth.month && today.day >= dateOfBirth.day);
   if (!hadBirthdayThisYear) age--;
   return age;
 }
 
 /// The date someone turns 18, when under-18 protections stop.
-DateTime adultFromBirthDate(DateTime dateOfBirth) =>
-    DateTime.utc(dateOfBirth.year + adultAge, dateOfBirth.month, dateOfBirth.day);
+DateTime adultFromBirthDate(DateTime dateOfBirth) => DateTime.utc(
+  dateOfBirth.year + adultAge,
+  dateOfBirth.month,
+  dateOfBirth.day,
+);
 
 /// A member's profile. Filled in step by step during sign-up, then saved.
 ///
@@ -107,11 +142,13 @@ class SignUpData {
   String name = '';
   DateTime? dateOfBirth;
   String? sport;
+
   /// Typed in when [sport] is [otherSport].
   String customSport = '';
   CompetitionLevel? level;
   AthleteCategory? category;
   final Set<Topic> topics = {};
+
   /// When the member agreed to the Privacy Notice (PDPA consent).
   DateTime? consentGivenAt;
 

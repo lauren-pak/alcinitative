@@ -69,7 +69,9 @@ class _TagSearchScreenState extends State<TagSearchScreen> {
       ),
     );
     if (mounted && _tag != null) {
-      setState(() => _results = _fetch(_tag!));
+      setState(() {
+        _results = _fetch(_tag!);
+      });
     }
   }
 
@@ -120,16 +122,20 @@ class _TagSearchScreenState extends State<TagSearchScreen> {
                         debugPrint('Tag search failed: ${snapshot.error}');
                         return Padding(
                           padding: const EdgeInsets.all(24),
-                          child: Text("Couldn't search. Try again.",
-                              style: textTheme.bodyLarge),
+                          child: Text(
+                            "Couldn't search. Try again.",
+                            style: textTheme.bodyLarge,
+                          ),
                         );
                       }
                       final posts = snapshot.data!;
                       if (posts.isEmpty) {
                         return Padding(
                           padding: const EdgeInsets.all(24),
-                          child: Text('No posts tagged #$_tag yet.',
-                              style: textTheme.bodyLarge),
+                          child: Text(
+                            'No posts tagged #$_tag yet.',
+                            style: textTheme.bodyLarge,
+                          ),
                         );
                       }
                       return ListView(

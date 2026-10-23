@@ -89,10 +89,10 @@ class _AuthMethodPickerState extends State<AuthMethodPicker> {
   }
 
   void _toggle(SignUpMethod method) => setState(() {
-        _open = _open == method ? null : method;
-        _error = null;
-        _autovalidate = AutovalidateMode.disabled;
-      });
+    _open = _open == method ? null : method;
+    _error = null;
+    _autovalidate = AutovalidateMode.disabled;
+  });
 
   bool _validate(GlobalKey<FormState> form) {
     final valid = form.currentState!.validate();
@@ -191,7 +191,8 @@ class _AuthMethodPickerState extends State<AuthMethodPicker> {
                 labelText: 'Phone number',
                 prefixText: '+65 ',
                 // Firebase asks apps to warn that an SMS will be sent.
-                helperText: "We'll text you a 6-digit code. Standard "
+                helperText:
+                    "We'll text you a 6-digit code. Standard "
                     'message rates may apply.',
                 helperMaxLines: 2,
                 border: OutlineInputBorder(),
@@ -201,8 +202,8 @@ class _AuthMethodPickerState extends State<AuthMethodPicker> {
               onChanged: (v) => _phone = v.replaceAll(' ', ''),
               validator: (v) =>
                   _sgPhonePattern.hasMatch(v?.replaceAll(' ', '') ?? '')
-                      ? null
-                      : 'Enter an 8-digit Singapore number',
+                  ? null
+                  : 'Enter an 8-digit Singapore number',
             ),
             if (!_codeSent) ...[
               _buildError(),

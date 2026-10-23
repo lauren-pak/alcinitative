@@ -13,7 +13,7 @@ class PrivacyNoticeScreen extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final contact = dataProtectionOfficerEmail.isEmpty
         ? 'Our Data Protection Officer contact will be added here before the '
-            'app launches.'
+              'app launches.'
         : 'Email our Data Protection Officer at $dataProtectionOfficerEmail.';
 
     return Scaffold(
@@ -22,8 +22,10 @@ class PrivacyNoticeScreen extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            Text('How we look after your information',
-                style: textTheme.headlineSmall),
+            Text(
+              'How we look after your information',
+              style: textTheme.headlineSmall,
+            ),
             const SizedBox(height: 4),
             Text('Version $privacyNoticeVersion', style: textTheme.bodySmall),
             const SizedBox(height: 16),
@@ -45,6 +47,18 @@ class PrivacyNoticeScreen extends StatelessWidget {
                     'depending on how you sign in.',
                 'What you post: your posts, replies, journeys and '
                     'reactions like "Been there" and "Helpful".',
+                'Events you sign up for, and whether you are bringing a '
+                    'support person.',
+                'If you ask to be verified: your programme and anything '
+                    'you tell us to help check it. Moderators and event '
+                    'organisers check it, sometimes with your sports '
+                    'association or Special Olympics Singapore.',
+                'Your weekly streak and badges are worked out on your '
+                    'phone from your posts and events. We don\'t store '
+                    'them.',
+                "If you're under 18 and sign up for an event: your parent "
+                    "or guardian's name and phone number, and that they "
+                    'said you can go.',
                 'Reports you make, the members you block, the topics you '
                     'mute, and whether you show up in Find athlete.',
                 'Tags you add to your posts, and when you last edited a '
@@ -66,6 +80,9 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 'Your topics decide what shows up in your feed.',
                 'Your posts and replies are shared with other members, '
                     'because sharing experiences is what the app is for.',
+                'Event organisers use your event sign-ups to plan the day, '
+                    'and a guardian\'s phone number to contact them if '
+                    'needed.',
                 'Moderators check reported posts and posts that might '
                     'be unsafe, to keep everyone safe.',
                 "We never sell your information or use it for adverts.",
@@ -96,10 +113,14 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 'If you post anonymously, other members don\'t see your '
                     'name. Our moderators can still see who posted, to keep '
                     'everyone safe.',
+                'Members can see the ✓ on verified athletes.',
                 'Moderators can see posts and replies waiting for a check, '
                     'and the reports about them. The person you report is '
                     "never told who reported them, and people you block "
                     "aren't told.",
+                "Only you and the event organisers can see that you "
+                    'signed up for an event. Other members only see how '
+                    'many people are going.',
                 'Your date of birth, email and phone number are never '
                     'shown to other members.',
               ],
@@ -121,8 +142,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
                     'and videos are deleted too.',
                 'When you delete your account, we delete your profile, '
                     'your athlete ID, your posts, replies, reactions, '
-                    'reports, blocks, photos and videos, and your sign-in '
-                    'details.',
+                    'reports, blocks, event sign-ups, verification, photos '
+                    'and videos, and your sign-in details.',
               ],
             ),
             const _Section(
@@ -144,8 +165,11 @@ class PrivacyNoticeScreen extends StatelessWidget {
                 "Under-18s never show up in search or browsing. Other people "
                     'can only find your card with the athlete ID you give '
                     'them.',
-                'Videos and sports nutrition posts from under-18s are '
-                    'checked by a moderator before other members see them.',
+                'Videos from under-18s are checked by a moderator before '
+                    'other members see them.',
+                'You can go to events with a parent or guardian\'s OK. Some '
+                    'events are for over-18s only. Every event has a safety '
+                    'lead you can go to on the day.',
                 'Only other under-18s can reply to your posts, unless you '
                     'let adults reply. A moderator checks adult replies '
                     'first.',

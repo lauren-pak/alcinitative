@@ -63,7 +63,8 @@ class DefaultFirebaseOptions {
     messagingSenderId: '427340183202',
     projectId: 'stride-by-stride',
     storageBucket: 'stride-by-stride.firebasestorage.app',
-    iosClientId: '427340183202-09088ljsogjifoqc2og3c6obgpsf0tvg.apps.googleusercontent.com',
+    iosClientId:
+        '427340183202-09088ljsogjifoqc2og3c6obgpsf0tvg.apps.googleusercontent.com',
     iosBundleId: 'com.stridebystride',
   );
 }

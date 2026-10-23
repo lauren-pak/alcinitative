@@ -54,11 +54,15 @@ class _EditPostScreenState extends State<EditPostScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(_easy
-            ? 'That did not save. Try again.'
-            : "Couldn't save. Check your connection and try again."),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _easy
+                ? 'That did not save. Try again.'
+                : "Couldn't save. Check your connection and try again.",
+          ),
+        ),
+      );
     }
   }
 
@@ -126,15 +130,20 @@ class _EditPostScreenState extends State<EditPostScreen> {
 }
 
 /// Asks before deleting a post. Returns true to delete.
-Future<bool> confirmDeletePost(BuildContext context, {bool easy = false}) async {
+Future<bool> confirmDeletePost(
+  BuildContext context, {
+  bool easy = false,
+}) async {
   final result = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       title: Text(easy ? 'Delete your post?' : 'Delete this post?'),
-      content: Text(easy
-          ? 'Your post will be gone for good.'
-          : 'It will be deleted for good, with its photos and video. '
-              "Other people's replies will no longer be shown."),
+      content: Text(
+        easy
+            ? 'Your post will be gone for good.'
+            : 'It will be deleted for good, with its photos and video. '
+                  "Other people's replies will no longer be shown.",
+      ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
@@ -153,4 +162,3 @@ Future<bool> confirmDeletePost(BuildContext context, {bool easy = false}) async 
   );
   return result ?? false;
 }
-

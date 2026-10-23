@@ -16,14 +16,15 @@ import 'feed_repository.dart';
 /// everything they wrote (PDPA: withdrawing consent).
 class FirestoreFeedRepository implements FeedRepository {
   FirestoreFeedRepository({FirebaseFirestore? db, FirebaseStorage? storage})
-      : _db = db ?? FirebaseFirestore.instance,
-        _storage = storage ?? FirebaseStorage.instance;
+    : _db = db ?? FirebaseFirestore.instance,
+      _storage = storage ?? FirebaseStorage.instance;
 
   final FirebaseFirestore _db;
   final FirebaseStorage _storage;
 
   CollectionReference<Map<String, dynamic>> get _posts =>
       _db.collection('posts');
+
   /// Only posts everyone may see. Held and removed posts never reach the
   /// feed (the rules refuse queries without this filter).
   Query<Map<String, dynamic>> get _visible =>
@@ -34,8 +35,10 @@ class FirestoreFeedRepository implements FeedRepository {
       _db.collection('postAuthors').doc(postId);
   CollectionReference<Map<String, dynamic>> _contributions(String uid) =>
       _db.collection('users').doc(uid).collection('contributions');
-  DocumentReference<Map<String, dynamic>> _beenThere(String postId, String uid) =>
-      _posts.doc(postId).collection('beenThere').doc(uid);
+  DocumentReference<Map<String, dynamic>> _beenThere(
+    String postId,
+    String uid,
+  ) => _posts.doc(postId).collection('beenThere').doc(uid);
   DocumentReference<Map<String, dynamic>> _helpful(Reply reply, String uid) =>
       _posts
           .doc(reply.postId)
@@ -47,11 +50,23 @@ class FirestoreFeedRepository implements FeedRepository {
   void _record(WriteBatch batch, String uid, DocumentReference ref) =>
       batch.set(_contributions(uid).doc(), {'path': ref.path});
 
+  /// Stored topic names for [topics], including old names (see
+  /// [Topic.legacy]).
+  static List<String> _topicNames(Set<Topic> topics) => [
+    for (final t in topics) ...t.storedNames,
+  ];
+
   @override
-  Future<List<Post>> latest(Set<Topic> topics, {int limit = 30}) async {
+  Future<List<Post>> latest(
+    Set<Topic> topics, {
+    int limit = 30,
+    PostType? type,
+  }) async {
     if (topics.isEmpty) return [];
-    final snapshot = await _visible
-        .where('topic', whereIn: [for (final t in topics) t.name])
+    var query = _visible;
+    if (type != null) query = query.where('type', isEqualTo: type.name);
+    final snapshot = await query
+        .where('topic', whereIn: _topicNames(topics))
         .orderBy('createdAt', descending: true)
         .limit(limit)
         .get();
@@ -64,7 +79,7 @@ class FirestoreFeedRepository implements FeedRepository {
     final snapshot = await _visible
         .where('type', isEqualTo: PostType.question.name)
         .where('answered', isEqualTo: false)
-        .where('topic', whereIn: [for (final t in topics) t.name])
+        .where('topic', whereIn: _topicNames(topics))
         .orderBy('createdAt', descending: true)
         .limit(limit)
         .get();
@@ -109,8 +124,8 @@ class FirestoreFeedRepository implements FeedRepository {
         'replyPolicy': draft.replyPolicy.name,
         'anonymous': draft.anonymous,
         'answered': false,
-        'status': (hold == null ? ContentStatus.visible : ContentStatus.held)
-            .name,
+        'status':
+            (hold == null ? ContentStatus.visible : ContentStatus.held).name,
         if (hold != null) 'holdReason': hold.name,
         'reportCount': 0,
         'adultRepliesAllowed': minor && draft.adultRepliesAllowed,
@@ -119,6 +134,10 @@ class FirestoreFeedRepository implements FeedRepository {
         'beenThereCount': 0,
         'media': [for (final m in draft.media) m.toMap()],
         if (draft.tags.isNotEmpty) 'tags': draft.tags,
+        if (draft.prompt case final prompt?) ...{
+          'promptId': prompt.id,
+          'promptText': prompt.text,
+        },
         if (!draft.anonymous) ..._authorFields(Author.of(author)),
         if (journey != null) ...{
           'journeyId': journey.id,
@@ -159,12 +178,61 @@ class FirestoreFeedRepository implements FeedRepository {
       holdReason: hold,
       adultRepliesAllowed: minor && draft.adultRepliesAllowed,
       tags: draft.tags,
+      promptId: draft.prompt?.id,
+      promptText: draft.prompt?.text,
+    );
+  }
+
+  CollectionReference<Map<String, dynamic>> get _prompts =>
+      _db.collection('prompts');
+
+  @override
+  Future<WeeklyPrompt?> currentPrompt() async {
+    final snapshot = await _prompts
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .get();
+    if (snapshot.docs.isEmpty) return null;
+    final d = snapshot.docs.first;
+    return WeeklyPrompt(
+      id: d.id,
+      text: d.data()['text'] as String? ?? '',
+      createdAt: _date(d.data()['createdAt']),
     );
   }
 
   @override
-  Future<Post> editPost(Account author, Post post,
-      {required String text, required List<String> tags}) async {
+  Future<WeeklyPrompt> createPrompt(Account moderator, String text) async {
+    final ref = _prompts.doc();
+    await ref.set({
+      'text': text.trim(),
+      'createdBy': moderator.uid,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    return WeeklyPrompt(
+      id: ref.id,
+      text: text.trim(),
+      createdAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<List<Post>> answersTo(String promptId) async {
+    final snapshot = await _visible
+        .where('promptId', isEqualTo: promptId)
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .get();
+    return [for (final doc in snapshot.docs) _postFrom(doc.id, doc.data())];
+  }
+
+  @override
+  Future<Post> editPost(
+    Account author,
+    Post post, {
+    required String text,
+    required List<String> tags,
+  }) async {
     final hold = FeedRules.editHoldReasonFor(post, text.trim(), tags);
     await _posts.doc(post.id).update({
       'text': text.trim(),
@@ -192,13 +260,21 @@ class FirestoreFeedRepository implements FeedRepository {
     final contributions = await _contributions(author.uid).get();
     final mine = [
       for (final c in contributions.docs)
-        if (_belongsToPost(c.data()['path'] as String? ?? '', post.id, mediaIds))
+        if (_belongsToPost(
+          c.data()['path'] as String? ?? '',
+          post.id,
+          mediaIds,
+        ))
           c,
     ];
     await _deleteRecorded(mine);
   }
 
-  static bool _belongsToPost(String path, String postId, List<String> mediaIds) =>
+  static bool _belongsToPost(
+    String path,
+    String postId,
+    List<String> mediaIds,
+  ) =>
       path == 'posts/$postId' ||
       path == 'postAuthors/$postId' ||
       mediaIds.any(path.contains);
@@ -238,7 +314,10 @@ class FirestoreFeedRepository implements FeedRepository {
     ];
     final docs = await Future.wait([
       for (final id in ids)
-        _posts.doc(id).get().then<DocumentSnapshot<Map<String, dynamic>>?>(
+        _posts
+            .doc(id)
+            .get()
+            .then<DocumentSnapshot<Map<String, dynamic>>?>(
               (d) => d,
               // Gone (deleted or never finished): skip it.
               onError: (_) => null,
@@ -276,9 +355,9 @@ class FirestoreFeedRepository implements FeedRepository {
     final mine = viewer == null
         ? null
         : collection
-            .where('authorUid', isEqualTo: viewer.uid)
-            .where('status', isEqualTo: ContentStatus.held.name)
-            .get();
+              .where('authorUid', isEqualTo: viewer.uid)
+              .where('status', isEqualTo: ContentStatus.held.name)
+              .get();
     final docs = [
       ...(await visible).docs,
       if (mine != null) ...(await mine).docs,
@@ -288,8 +367,12 @@ class FirestoreFeedRepository implements FeedRepository {
   }
 
   @override
-  Future<Reply> addReply(Account author, Post post, String text,
-      {Reply? parent}) async {
+  Future<Reply> addReply(
+    Account author,
+    Post post,
+    String text, {
+    Reply? parent,
+  }) async {
     final postRef = _posts.doc(post.id);
     final ref = postRef.collection('replies').doc();
     final minor = FeedRules.isMinor(author);
@@ -298,8 +381,8 @@ class FirestoreFeedRepository implements FeedRepository {
       ..set(ref, {
         ..._authorFields(Author.of(author)),
         if (parent != null) 'parentReplyId': parent.id,
-        'status': (hold == null ? ContentStatus.visible : ContentStatus.held)
-            .name,
+        'status':
+            (hold == null ? ContentStatus.visible : ContentStatus.held).name,
         if (hold != null) 'holdReason': hold.name,
         'reportCount': 0,
         'authorRole': author.profile.role!.name,
@@ -354,10 +437,16 @@ class FirestoreFeedRepository implements FeedRepository {
 
   @override
   Future<Set<String>> myHelpful(
-      String postId, List<Reply> replies, Account viewer) async {
+    String postId,
+    List<Reply> replies,
+    Account viewer,
+  ) async {
     final marked = await Future.wait([
       for (final reply in replies)
-        _helpful(reply, viewer.uid).get().then((s) => s.exists ? reply.id : null),
+        _helpful(
+          reply,
+          viewer.uid,
+        ).get().then((s) => s.exists ? reply.id : null),
     ]);
     return marked.whereType<String>().toSet();
   }
@@ -397,14 +486,33 @@ class FirestoreFeedRepository implements FeedRepository {
         .where('ownerUid', isEqualTo: owner.uid)
         .orderBy('createdAt', descending: true)
         .get();
-    return [
-      for (final doc in snapshot.docs)
-        Journey(
-          id: doc.id,
-          ownerUid: owner.uid,
-          title: doc.data()['title'] as String,
-        ),
-    ];
+    return [for (final doc in snapshot.docs) _journeyFrom(doc.id, doc.data())];
+  }
+
+  static Journey _journeyFrom(String id, Map<String, dynamic> d) => Journey(
+    id: id,
+    ownerUid: d['ownerUid'] as String? ?? '',
+    title: d['title'] as String? ?? '',
+    intro: d['intro'] as String? ?? '',
+  );
+
+  @override
+  Future<Journey?> getJourney(String journeyId) async {
+    final data = (await _journeys.doc(journeyId).get()).data();
+    return data == null ? null : _journeyFrom(journeyId, data);
+  }
+
+  @override
+  Future<Journey> updateJourney(
+    Journey journey, {
+    required String title,
+    required String intro,
+  }) async {
+    await _journeys.doc(journey.id).update({
+      'title': title.trim(),
+      'intro': intro.trim(),
+    });
+    return journey.copyWith(title: title.trim(), intro: intro.trim());
   }
 
   @override
@@ -429,7 +537,8 @@ class FirestoreFeedRepository implements FeedRepository {
 
   /// Deletes recorded documents and files, and their contribution records.
   Future<void> _deleteRecorded(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> contributions) async {
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> contributions,
+  ) async {
     // Storage files first, and ownership links (author, media owner) last:
     // the rules check those links when deleting posts and files.
     int rank(QueryDocumentSnapshot<Map<String, dynamic>> d) {
@@ -441,8 +550,7 @@ class FirestoreFeedRepository implements FeedRepository {
       return 1;
     }
 
-    final docs = [...contributions]
-      ..sort((a, b) => rank(a) - rank(b));
+    final docs = [...contributions]..sort((a, b) => rank(a) - rank(b));
     for (final c in docs.where((d) => rank(d) == 0)) {
       try {
         await _storage.ref(c.data()['path'] as String).delete();
@@ -466,12 +574,14 @@ class FirestoreFeedRepository implements FeedRepository {
   }
 
   static Map<String, Object?> _authorFields(Author a) => {
-        'authorUid': a.uid,
-        'authorName': a.name,
-        'authorSport': a.sport,
-        'authorLevel': a.level?.name,
-        'authorCategory': a.category?.name,
-      };
+    'authorUid': a.uid,
+    'authorName': a.name,
+    'authorSport': a.sport,
+    'authorLevel': a.level?.name,
+    'authorCategory': a.category?.name,
+    // Checked by the rules against verifiedAthletes.
+    'authorVerified': a.verified,
+  };
 
   static Author? _authorFrom(Map<String, dynamic> d) {
     final uid = d['authorUid'] as String?;
@@ -483,48 +593,50 @@ class FirestoreFeedRepository implements FeedRepository {
       sport: d['authorSport'] as String?,
       level: _enum(CompetitionLevel.values, d['authorLevel']),
       category: _enum(AthleteCategory.values, d['authorCategory']),
+      verified: d['authorVerified'] as bool? ?? false,
     );
   }
 
   static Post _postFrom(String id, Map<String, dynamic> d) => Post(
-        id: id,
-        type: _enum(PostType.values, d['type']) ?? PostType.experience,
-        topic: _enum(Topic.values, d['topic']) ?? Topic.training,
-        text: d['text'] as String? ?? '',
-        createdAt: _date(d['createdAt']),
-        author: d['anonymous'] == true ? null : _authorFrom(d),
-        authorRole: _enum(UserRole.values, d['authorRole']) ?? UserRole.athlete,
-        minorAuthor: d['minorAuthor'] as bool? ?? true,
-        replyPolicy:
-            _enum(ReplyPolicy.values, d['replyPolicy']) ?? ReplyPolicy.none,
-        journeyId: d['journeyId'] as String?,
-        journeyTitle: d['journeyTitle'] as String?,
-        media: [
-          for (final m in (d['media'] as List?) ?? const [])
-            MediaItem.fromMap(Map<String, dynamic>.from(m as Map)),
-        ],
-        respondsToId: d['respondsToId'] as String?,
-        respondsToText: d['respondsToText'] as String?,
-        status: _enum(ContentStatus.values, d['status']) ??
-            ContentStatus.visible,
-        holdReason: _enum(HoldReason.values, d['holdReason']),
-        reportCount: (d['reportCount'] as num?)?.toInt() ?? 0,
-        adultRepliesAllowed: d['adultRepliesAllowed'] as bool? ?? false,
-        tags: [for (final t in (d['tags'] as List?) ?? const []) t as String],
-        editedAt: (d['editedAt'] as Timestamp?)?.toDate(),
-        answered: d['answered'] as bool? ?? false,
-        replyCount: (d['replyCount'] as num?)?.toInt() ?? 0,
-        responseCount: (d['responseCount'] as num?)?.toInt() ?? 0,
-        beenThereCount: (d['beenThereCount'] as num?)?.toInt() ?? 0,
-      );
+    id: id,
+    type: _enum(PostType.values, d['type']) ?? PostType.experience,
+    topic: Topic.fromStored(d['topic']) ?? Topic.training,
+    text: d['text'] as String? ?? '',
+    createdAt: _date(d['createdAt']),
+    author: d['anonymous'] == true ? null : _authorFrom(d),
+    authorRole: _enum(UserRole.values, d['authorRole']) ?? UserRole.athlete,
+    minorAuthor: d['minorAuthor'] as bool? ?? true,
+    replyPolicy:
+        _enum(ReplyPolicy.values, d['replyPolicy']) ?? ReplyPolicy.none,
+    journeyId: d['journeyId'] as String?,
+    journeyTitle: d['journeyTitle'] as String?,
+    media: [
+      for (final m in (d['media'] as List?) ?? const [])
+        MediaItem.fromMap(Map<String, dynamic>.from(m as Map)),
+    ],
+    respondsToId: d['respondsToId'] as String?,
+    respondsToText: d['respondsToText'] as String?,
+    status: _enum(ContentStatus.values, d['status']) ?? ContentStatus.visible,
+    holdReason: _enum(HoldReason.values, d['holdReason']),
+    reportCount: (d['reportCount'] as num?)?.toInt() ?? 0,
+    adultRepliesAllowed: d['adultRepliesAllowed'] as bool? ?? false,
+    tags: [for (final t in (d['tags'] as List?) ?? const []) t as String],
+    editedAt: (d['editedAt'] as Timestamp?)?.toDate(),
+    promptId: d['promptId'] as String?,
+    promptText: d['promptText'] as String?,
+    answered: d['answered'] as bool? ?? false,
+    replyCount: (d['replyCount'] as num?)?.toInt() ?? 0,
+    responseCount: (d['responseCount'] as num?)?.toInt() ?? 0,
+    beenThereCount: (d['beenThereCount'] as num?)?.toInt() ?? 0,
+  );
 
   static Reply _replyFrom(String postId, String id, Map<String, dynamic> d) =>
       Reply(
         id: id,
         postId: postId,
         parentReplyId: d['parentReplyId'] as String?,
-        status: _enum(ContentStatus.values, d['status']) ??
-            ContentStatus.visible,
+        status:
+            _enum(ContentStatus.values, d['status']) ?? ContentStatus.visible,
         holdReason: _enum(HoldReason.values, d['holdReason']),
         reportCount: (d['reportCount'] as num?)?.toInt() ?? 0,
         author: _authorFrom(d)!,

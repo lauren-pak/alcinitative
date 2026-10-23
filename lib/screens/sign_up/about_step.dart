@@ -42,7 +42,8 @@ class _AboutStepState extends State<AboutStep> {
     final picked = await showDatePicker(
       context: context,
       initialDate:
-          widget.data.dateOfBirth ?? DateTime(now.year - 16, now.month, now.day),
+          widget.data.dateOfBirth ??
+          DateTime(now.year - 16, now.month, now.day),
       firstDate: DateTime(now.year - 100),
       lastDate: now,
       initialEntryMode: DatePickerEntryMode.input,
@@ -68,7 +69,8 @@ class _AboutStepState extends State<AboutStep> {
     final data = widget.data;
     final textTheme = Theme.of(context).textTheme;
     final dob = data.dateOfBirth;
-    final showMinorNotice = dob != null &&
+    final showMinorNotice =
+        dob != null &&
         ageOn(dob, DateTime.now()) >= minimumAge &&
         data.isMinorOn(DateTime.now());
 
@@ -101,7 +103,8 @@ class _AboutStepState extends State<AboutStep> {
               onTap: _pickDateOfBirth,
               decoration: const InputDecoration(
                 labelText: 'Date of birth',
-                helperText: 'Used to keep younger members safe. '
+                helperText:
+                    'Used to keep younger members safe. '
                     'Never shown on your profile.',
                 helperMaxLines: 2,
                 border: OutlineInputBorder(),

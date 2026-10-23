@@ -230,7 +230,13 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final post = _post;
-    final blocked = FeedRules.replyBlockedFor(widget.viewer, post);
+    final blocked = FeedRules.replyBlockedFor(
+      widget.viewer,
+      post,
+      isMine: _isMine,
+    );
+    final canAnswerWithPost =
+        FeedRules.spotlightBlockedFor(widget.viewer) == null;
     final canMarkHelped =
         _isMine && post.type == PostType.question && !post.answered;
 
@@ -282,7 +288,7 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
             ],
             if (post.needsAdviceBanner) ...[
               const SizedBox(height: 16),
-              easyAdviceNote(post.topic),
+              easyAdviceNote(),
             ],
             const SizedBox(height: 16),
             SizedBox(
@@ -393,15 +399,17 @@ class _EasyPostScreenState extends State<EasyPostScreen> {
             if (blocked != null)
               EasyNote(text: blocked, icon: Icons.lock_outline)
             else ...[
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonalIcon(
-                  onPressed: _busy ? null : _answerWithPost,
-                  icon: const Icon(Icons.videocam_outlined),
-                  label: const Text('Answer with a video or post'),
+              if (canAnswerWithPost) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: _busy ? null : _answerWithPost,
+                    icon: const Icon(Icons.videocam_outlined),
+                    label: const Text('Answer with a video or post'),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
+              ],
               TextField(
                 controller: _replyText,
                 minLines: 2,

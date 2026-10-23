@@ -25,8 +25,10 @@ class StorageImage extends StatelessWidget {
           color: scheme.surfaceContainerHighest,
           child: Center(
             child: snapshot.hasError
-                ? Icon(Icons.broken_image_outlined,
-                    color: scheme.onSurfaceVariant)
+                ? Icon(
+                    Icons.broken_image_outlined,
+                    color: scheme.onSurfaceVariant,
+                  )
                 : const SizedBox.square(
                     dimension: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
@@ -201,17 +203,18 @@ class _InlineVideoState extends State<InlineVideo> {
               ),
             if (_failed)
               const Center(
-                child: Text("Couldn't play this video",
-                    style: TextStyle(color: Colors.white)),
+                child: Text(
+                  "Couldn't play this video",
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
           ],
         ),
       );
     }
     return GestureDetector(
-      onTap: () => controller.value.isPlaying
-          ? controller.pause()
-          : controller.play(),
+      onTap: () =>
+          controller.value.isPlaying ? controller.pause() : controller.play(),
       child: Stack(
         fit: StackFit.expand,
         children: [

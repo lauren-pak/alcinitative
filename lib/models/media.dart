@@ -19,12 +19,12 @@ class MediaItem {
   });
 
   factory MediaItem.fromMap(Map<String, dynamic> m) => MediaItem(
-        id: m['id'] as String,
-        kind: m['kind'] == 'video' ? MediaKind.video : MediaKind.photo,
-        width: (m['width'] as num?)?.toInt() ?? 0,
-        height: (m['height'] as num?)?.toInt() ?? 0,
-        durationMs: (m['durationMs'] as num?)?.toInt(),
-      );
+    id: m['id'] as String,
+    kind: m['kind'] == 'video' ? MediaKind.video : MediaKind.photo,
+    width: (m['width'] as num?)?.toInt() ?? 0,
+    height: (m['height'] as num?)?.toInt() ?? 0,
+    durationMs: (m['durationMs'] as num?)?.toInt(),
+  );
 
   final String id;
   final MediaKind kind;
@@ -39,16 +39,15 @@ class MediaItem {
   String get previewPath =>
       kind == MediaKind.video ? 'media/${id}_thumb.jpg' : path;
 
-  double get aspectRatio =>
-      width > 0 && height > 0 ? width / height : 4 / 3;
+  double get aspectRatio => width > 0 && height > 0 ? width / height : 4 / 3;
 
   Map<String, Object?> toMap() => {
-        'id': id,
-        'kind': kind.name,
-        'width': width,
-        'height': height,
-        if (durationMs != null) 'durationMs': durationMs,
-      };
+    'id': id,
+    'kind': kind.name,
+    'width': width,
+    'height': height,
+    if (durationMs != null) 'durationMs': durationMs,
+  };
 }
 
 /// A photo picked on the device, already cleaned (resized, no metadata).

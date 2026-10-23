@@ -25,6 +25,8 @@ Account _account(
 }) {
   final now = DateTime.now();
   return Account(
+    // Test athletes are verified unless a test says otherwise.
+    verified: true,
     uid: uid,
     athleteId: 'AA-$uid',
     joinedAt: now,
@@ -63,6 +65,8 @@ void main() {
     Services.safety = safety;
     Services.moderation = FakeModerationRepository(feed, safety);
     Services.media = FakeMediaRepository();
+    Services.events = InMemoryEventsRepository();
+    Services.verification = FakeVerificationRepository(profiles);
     displayMode.value = DisplayMode.standard;
   });
 
@@ -107,23 +111,26 @@ void main() {
     expect(displayMode.value, DisplayMode.easy);
   });
 
-  testWidgets('Easy home shows Home · Post · Me and big topic pictures', (
+  testWidgets('Easy mode: Events · Huddle · Me and big category pictures', (
     tester,
   ) async {
     await _pump(
       tester,
       HomeShell(account: _account('me'), isNewAccount: false),
     );
+    expect(find.text('Events'), findsWidgets);
+    await tester.tap(find.text('Huddle'));
+    await tester.pumpAndSettle();
 
     for (final label in [
-      'Home',
-      'Post',
+      'Huddle',
       'Me',
+      'Share or ask',
       'What do you want to see?',
-      'Injuries',
       'Training',
-      'Food',
-      'Competing',
+      'My mind',
+      'Game day',
+      'Team & fun',
     ]) {
       expect(find.text(label), findsWidgets, reason: label);
     }
@@ -164,7 +171,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('What do you want to do?'), findsOneWidget);
-    await tester.tap(find.text('Ask a question'));
+    await tester.tap(find.text('Ask an athlete'));
     await tester.pump();
     await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
@@ -213,16 +220,10 @@ void main() {
     expect(created?.anonymous, isFalse);
   });
 
-  testWidgets('Easy posting lets under-18s pick Food, checked by a helper', (
-    tester,
-  ) async {
+  testWidgets('Easy posting: under-18s can pick any category', (tester) async {
     await _pump(tester, EasyComposeScreen(account: _account('t', age: 15)));
-    await tester.tap(find.text('Food'));
+    await tester.tap(find.text('My mind'));
     await tester.pump();
-    expect(
-      find.textContaining('A helper will check your post about food'),
-      findsOneWidget,
-    );
     final next = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Next'),
     );
@@ -233,15 +234,13 @@ void main() {
     final post = await feed.createPost(
       _account('a'),
       NewPost()
-        ..topic = Topic.injury
+        ..topic = Topic.mindset
         ..text = 'My knee hurt after bowling.',
     );
     await _pump(tester, EasyPostScreen(post: post, viewer: _account('me')));
 
-    expect(
-      find.textContaining("It is not advice from a doctor"),
-      findsOneWidget,
-    );
+    // A spotlight, not a question, so no advice note.
+    expect(find.textContaining('Ask your coach or doctor'), findsNothing);
     await tester.tap(find.text('👋 Me too · 0'));
     await tester.pumpAndSettle();
     expect(find.text('👋 Me too · 1'), findsOneWidget);

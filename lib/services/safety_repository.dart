@@ -16,11 +16,19 @@ class BlockedMember {
 abstract class SafetyRepository {
   /// Reports a post. Hides it for review once [reportsToHide] members have.
   /// Returns false if [reporter] already reported it.
-  Future<bool> reportPost(Account reporter, Post post, ReportReason reason,
-      {String details = ''});
+  Future<bool> reportPost(
+    Account reporter,
+    Post post,
+    ReportReason reason, {
+    String details = '',
+  });
 
-  Future<bool> reportReply(Account reporter, Reply reply, ReportReason reason,
-      {String details = ''});
+  Future<bool> reportReply(
+    Account reporter,
+    Reply reply,
+    ReportReason reason, {
+    String details = '',
+  });
 
   Future<Set<String>> blockedUids(Account me);
 

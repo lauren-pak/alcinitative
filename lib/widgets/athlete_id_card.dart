@@ -46,14 +46,18 @@ class AthleteIdCard extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 'ATHLETE APP',
-                style: textTheme.labelLarge
-                    ?.copyWith(color: onCard, letterSpacing: 1.5),
+                style: textTheme.labelLarge?.copyWith(
+                  color: onCard,
+                  letterSpacing: 1.5,
+                ),
               ),
               const Spacer(),
               Text(
                 isAthlete ? 'ATHLETE' : 'MEMBER',
-                style: textTheme.labelMedium
-                    ?.copyWith(color: faded, letterSpacing: 1.5),
+                style: textTheme.labelMedium?.copyWith(
+                  color: faded,
+                  letterSpacing: 1.5,
+                ),
               ),
             ],
           ),
@@ -118,8 +122,9 @@ class AthleteIdCard extends StatelessWidget {
               ),
               _CardField(
                 label: 'MEMBER SINCE',
-                value: MaterialLocalizations.of(context)
-                    .formatMonthYear(account.joinedAt),
+                value: MaterialLocalizations.of(
+                  context,
+                ).formatMonthYear(account.joinedAt),
                 valueStyle: textTheme.bodyMedium?.copyWith(color: onCard),
                 alignEnd: true,
               ),
@@ -148,15 +153,16 @@ class _CardField extends StatelessWidget {
   Widget build(BuildContext context) {
     final onCard = Theme.of(context).colorScheme.onPrimary;
     return Column(
-      crossAxisAlignment:
-          alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: alignEnd
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
       children: [
         Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: onCard.withValues(alpha: 0.8),
-                letterSpacing: 1.2,
-              ),
+            color: onCard.withValues(alpha: 0.8),
+            letterSpacing: 1.2,
+          ),
         ),
         const SizedBox(height: 2),
         Text(value, style: valueStyle),

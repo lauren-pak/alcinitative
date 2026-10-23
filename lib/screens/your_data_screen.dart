@@ -92,8 +92,8 @@ class _YourDataScreenState extends State<YourDataScreen> {
         title: const Text('Delete your account?'),
         content: const Text(
           'This permanently deletes your profile, your athlete ID, your '
-          "posts, replies and reactions, and your sign-in details. You can't "
-          'undo it.',
+          'posts, replies and reactions, your event RSVPs, and your sign-in '
+          "details. You can't undo it.",
         ),
         actions: [
           TextButton(
@@ -125,6 +125,8 @@ class _YourDataScreenState extends State<YourDataScreen> {
 
     setState(() => _deleting = true);
     try {
+      // Free up event spots first, then delete everything recorded.
+      await Services.events.cancelAllMyRsvps(_account);
       await Services.feed.deleteContributions(_account);
       await Services.profiles.delete(_account);
       await Services.auth.deleteCurrentUser();

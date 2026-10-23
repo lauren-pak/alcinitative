@@ -18,10 +18,10 @@ class GoogleAuth {
   static bool _initialized = false;
 
   static bool get isConfigured => switch (defaultTargetPlatform) {
-        TargetPlatform.iOS => googleIosClientId.isNotEmpty,
-        TargetPlatform.android => googleWebClientId.isNotEmpty,
-        _ => false,
-      };
+    TargetPlatform.iOS => googleIosClientId.isNotEmpty,
+    TargetPlatform.android => googleWebClientId.isNotEmpty,
+    _ => false,
+  };
 
   static Future<void> _ensureInitialized() async {
     if (_initialized) return;

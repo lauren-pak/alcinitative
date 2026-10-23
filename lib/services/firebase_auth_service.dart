@@ -30,8 +30,8 @@ class FirebaseAuthService implements AuthService {
     final method = providers.contains('google.com')
         ? SignUpMethod.google
         : providers.contains('phone')
-            ? SignUpMethod.phone
-            : SignUpMethod.email;
+        ? SignUpMethod.phone
+        : SignUpMethod.email;
     return AuthUser(
       uid: user.uid,
       method: method,
@@ -41,8 +41,10 @@ class FirebaseAuthService implements AuthService {
     );
   }
 
-  Future<AuthUser> _signIn(Future<UserCredential> Function() action,
-      {String? displayName}) async {
+  Future<AuthUser> _signIn(
+    Future<UserCredential> Function() action, {
+    String? displayName,
+  }) async {
     try {
       final result = await action();
       return _toAuthUser(result.user!, displayName: displayName);
@@ -53,16 +55,14 @@ class FirebaseAuthService implements AuthService {
 
   @override
   Future<AuthUser> signUpWithEmail(String email, String password) => _signIn(
-        () => _auth.createUserWithEmailAndPassword(
-          email: email,
-          password: password,
-        ),
-      );
+    () =>
+        _auth.createUserWithEmailAndPassword(email: email, password: password),
+  );
 
   @override
   Future<AuthUser> logInWithEmail(String email, String password) => _signIn(
-        () => _auth.signInWithEmailAndPassword(email: email, password: password),
-      );
+    () => _auth.signInWithEmailAndPassword(email: email, password: password),
+  );
 
   @override
   Future<String> sendPhoneCode(String phoneNumber) {
@@ -84,12 +84,12 @@ class FirebaseAuthService implements AuthService {
           codeAutoRetrievalTimeout: (_) {},
         )
         .catchError((Object e) {
-      if (!verificationId.isCompleted) {
-        verificationId.completeError(
-          e is FirebaseAuthException ? AuthException(_message(e)) : e,
-        );
-      }
-    });
+          if (!verificationId.isCompleted) {
+            verificationId.completeError(
+              e is FirebaseAuthException ? AuthException(_message(e)) : e,
+            );
+          }
+        });
     return verificationId.future;
   }
 
@@ -133,28 +133,26 @@ class FirebaseAuthService implements AuthService {
   }
 
   static String _message(FirebaseAuthException e) => switch (e.code) {
-        'email-already-in-use' =>
-          'This email already has an account. Log in instead.',
-        'invalid-email' => 'Enter a valid email address',
-        'weak-password' => 'Choose a stronger password',
-        'invalid-credential' ||
-        'wrong-password' ||
-        'user-not-found' =>
-          'Email or password is incorrect',
-        'invalid-verification-code' => "That code isn't right. Try again.",
-        'session-expired' || 'code-expired' =>
-          'That code has expired. Tap "Change number" to get a new one.',
-        'invalid-phone-number' => 'Enter an 8-digit Singapore number',
-        'too-many-requests' =>
-          'Too many attempts. Wait a few minutes and try again.',
-        'network-request-failed' =>
-          'No internet connection. Check it and try again.',
-        'operation-not-allowed' =>
-          "This sign-in method isn't turned on yet.",
-        'requires-recent-login' =>
-          'For your security, log out and log in again first.',
-        'billing-not-enabled' || 'quota-exceeded' =>
-          "Text messages aren't available yet. Use email or Google for now.",
-        _ => 'Something went wrong. Please try again. (${e.code})',
-      };
+    'email-already-in-use' =>
+      'This email already has an account. Log in instead.',
+    'invalid-email' => 'Enter a valid email address',
+    'weak-password' => 'Choose a stronger password',
+    'invalid-credential' ||
+    'wrong-password' ||
+    'user-not-found' => 'Email or password is incorrect',
+    'invalid-verification-code' => "That code isn't right. Try again.",
+    'session-expired' || 'code-expired' =>
+      'That code has expired. Tap "Change number" to get a new one.',
+    'invalid-phone-number' => 'Enter an 8-digit Singapore number',
+    'too-many-requests' =>
+      'Too many attempts. Wait a few minutes and try again.',
+    'network-request-failed' =>
+      'No internet connection. Check it and try again.',
+    'operation-not-allowed' => "This sign-in method isn't turned on yet.",
+    'requires-recent-login' =>
+      'For your security, log out and log in again first.',
+    'billing-not-enabled' || 'quota-exceeded' =>
+      "Text messages aren't available yet. Use email or Google for now.",
+    _ => 'Something went wrong. Please try again. (${e.code})',
+  };
 }

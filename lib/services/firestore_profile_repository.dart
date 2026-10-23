@@ -16,7 +16,7 @@ import 'profile_repository.dart';
 /// Email, phone and passwords are not stored here; Firebase Auth holds them.
 class FirestoreProfileRepository implements ProfileRepository {
   FirestoreProfileRepository({FirebaseFirestore? db})
-      : _db = db ?? FirebaseFirestore.instance;
+    : _db = db ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _db;
 
@@ -27,18 +27,23 @@ class FirestoreProfileRepository implements ProfileRepository {
 
   @override
   Future<Account?> load(String uid) async {
-    final data = (await _users.doc(uid).get()).data();
+    final results = await Future.wait([
+      _users.doc(uid).get(),
+      _db.collection('verifiedAthletes').doc(uid).get(),
+    ]);
+    final data = results[0].data();
     if (data == null) return null;
+    final verified = results[1].exists;
     final profile = _profileFrom(data)
       ..dateOfBirth = (data['dateOfBirth'] as Timestamp).toDate()
       ..method = _enum(SignUpMethod.values, data['signUpMethod'])
-      ..consentGivenAt =
-          (data['consent']?['acceptedAt'] as Timestamp?)?.toDate()
+      ..consentGivenAt = (data['consent']?['acceptedAt'] as Timestamp?)
+          ?.toDate()
       ..displayMode =
           _enum(DisplayMode.values, data['displayMode']) ?? DisplayMode.standard
       ..findable = data['findable'] as bool? ?? false;
     for (final name in (data['mutedTopics'] as List?) ?? const []) {
-      final topic = _enum(Topic.values, name);
+      final topic = Topic.fromStored(name);
       if (topic != null) profile.mutedTopics.add(topic);
     }
     return Account(
@@ -46,6 +51,7 @@ class FirestoreProfileRepository implements ProfileRepository {
       athleteId: data['athleteId'] as String,
       profile: profile,
       joinedAt: _date(data['createdAt']),
+      verified: verified,
     );
   }
 
@@ -160,7 +166,10 @@ class FirestoreProfileRepository implements ProfileRepository {
   }
 
   @override
-  Future<List<Account>> browse({String? sport, AthleteCategory? category}) async {
+  Future<List<Account>> browse({
+    String? sport,
+    AthleteCategory? category,
+  }) async {
     // The rules only allow listing cards that are findable.
     var query = _cards.where('findable', isEqualTo: true);
     if (sport != null) query = query.where('sport', isEqualTo: sport);
@@ -172,31 +181,32 @@ class FirestoreProfileRepository implements ProfileRepository {
       ..sort((a, b) => a.profile.name.compareTo(b.profile.name));
   }
 
-  Account _cardFrom(QueryDocumentSnapshot<Map<String, dynamic>> doc) =>
-      Account(
-        uid: doc.data()['ownerUid'] as String,
-        athleteId: doc.id,
-        profile: _profileFrom(doc.data()),
-        joinedAt: _date(doc.data()['joinedAt']),
-      );
+  Account _cardFrom(QueryDocumentSnapshot<Map<String, dynamic>> doc) => Account(
+    uid: doc.data()['ownerUid'] as String,
+    athleteId: doc.id,
+    profile: _profileFrom(doc.data()),
+    joinedAt: _date(doc.data()['joinedAt']),
+  );
 
   @override
   Future<void> delete(Account account) async {
     final batch = _db.batch()
       ..delete(_cards.doc(account.athleteId))
-      ..delete(_users.doc(account.uid));
+      ..delete(_users.doc(account.uid))
+      ..delete(_db.collection('verifiedAthletes').doc(account.uid))
+      ..delete(_db.collection('verificationRequests').doc(account.uid));
     await batch.commit();
   }
 
   /// Fields shown on the ID card, stored in both collections.
   static Map<String, Object?> _publicFields(SignUpData p) => {
-        'role': p.role!.name,
-        'name': p.name,
-        'sport': p.sport,
-        'customSport': p.customSport,
-        'level': p.level?.name,
-        'category': p.category?.name,
-      };
+    'role': p.role!.name,
+    'name': p.name,
+    'sport': p.sport,
+    'customSport': p.customSport,
+    'level': p.level?.name,
+    'category': p.category?.name,
+  };
 
   static SignUpData _profileFrom(Map<String, dynamic> data) {
     final profile = SignUpData()
@@ -207,7 +217,7 @@ class FirestoreProfileRepository implements ProfileRepository {
       ..level = _enum(CompetitionLevel.values, data['level'])
       ..category = _enum(AthleteCategory.values, data['category']);
     for (final name in (data['topics'] as List?) ?? const []) {
-      final topic = _enum(Topic.values, name);
+      final topic = Topic.fromStored(name);
       if (topic != null) profile.topics.add(topic);
     }
     return profile;

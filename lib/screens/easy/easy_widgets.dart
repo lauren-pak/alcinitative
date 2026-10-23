@@ -10,10 +10,10 @@ import '../../widgets/media_widgets.dart';
 
 /// Plain-language topic names for Easy mode.
 String easyTopicLabel(Topic topic) => switch (topic) {
-  Topic.injury => 'Injuries',
   Topic.training => 'Training',
-  Topic.nutrition => 'Food',
-  Topic.competition => 'Competing',
+  Topic.mindset => 'My mind',
+  Topic.gameDay => 'Game day',
+  Topic.teamLife => 'Team & fun',
 };
 
 /// A big square picture button for a topic or a choice.
@@ -114,11 +114,10 @@ class EasyNote extends StatelessWidget {
 }
 
 /// The plain-language "not medical advice" note.
-EasyNote easyAdviceNote(Topic topic) => EasyNote(
-  text: topic == Topic.nutrition
-      ? 'This is someone\'s story. It is not advice from a doctor or '
-            'dietitian.'
-      : "This is someone's story. It is not advice from a doctor.",
+EasyNote easyAdviceNote() => const EasyNote(
+  text:
+      "This is what worked for one athlete. Ask your coach or doctor "
+      'before you try it.',
 );
 
 /// The big "I need help" button for app bars.

@@ -2,15 +2,18 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:athlete_app/models/account.dart';
+import 'package:athlete_app/models/event.dart';
 import 'package:athlete_app/models/media.dart';
 import 'package:athlete_app/models/moderation.dart';
 import 'package:athlete_app/models/post.dart';
 import 'package:athlete_app/models/sign_up_data.dart';
 import 'package:athlete_app/services/auth_service.dart';
+import 'package:athlete_app/services/events_repository.dart';
 import 'package:athlete_app/services/feed_repository.dart';
 import 'package:athlete_app/services/media_repository.dart';
 import 'package:athlete_app/services/profile_repository.dart';
 import 'package:athlete_app/services/safety_repository.dart';
+import 'package:athlete_app/services/verification_repository.dart';
 
 /// In-memory stand-in for Firebase Auth.
 class FakeAuthService implements AuthService {
@@ -206,6 +209,12 @@ class InMemoryFeedRepository implements FeedRepository {
 
   List<Reply> allReplies(String postId) => _replies[postId] ??= [];
 
+  /// A moderator approves a held post (e.g. a new question) so it shows.
+  Post publish(Post post) {
+    setStatus('posts/${post.id}', ContentStatus.visible);
+    return _fresh(post.id);
+  }
+
   /// Changes a post's or reply's status, as a moderator or reports would.
   void setStatus(String path, ContentStatus status, {int? reportCount}) {
     final parts = path.split('/');
@@ -221,8 +230,15 @@ class InMemoryFeedRepository implements FeedRepository {
   }
 
   @override
-  Future<List<Post>> latest(Set<Topic> topics, {int limit = 30}) async =>
-      (_visible.where((p) => topics.contains(p.topic)).toList()
+  Future<List<Post>> latest(
+    Set<Topic> topics, {
+    int limit = 30,
+    PostType? type,
+  }) async =>
+      (_visible
+              .where((p) => topics.contains(p.topic))
+              .where((p) => type == null || p.type == type)
+              .toList()
             ..sort((a, b) => b.createdAt.compareTo(a.createdAt)))
           .take(limit)
           .toList();
@@ -265,6 +281,8 @@ class InMemoryFeedRepository implements FeedRepository {
       holdReason: hold,
       adultRepliesAllowed: minor && draft.adultRepliesAllowed,
       tags: draft.tags,
+      promptId: draft.prompt?.id,
+      promptText: draft.prompt?.text,
     );
     posts.add(post);
     _authors[post.id] = author.uid;
@@ -276,8 +294,12 @@ class InMemoryFeedRepository implements FeedRepository {
   }
 
   @override
-  Future<Post> editPost(Account author, Post post,
-      {required String text, required List<String> tags}) async {
+  Future<Post> editPost(
+    Account author,
+    Post post, {
+    required String text,
+    required List<String> tags,
+  }) async {
     if (_authors[post.id] != author.uid) throw StateError('permission-denied');
     final hold = FeedRules.editHoldReasonFor(_fresh(post.id), text, tags);
     final edited = _fresh(post.id).copyWith(
@@ -400,6 +422,40 @@ class InMemoryFeedRepository implements FeedRepository {
     journeys.add(journey);
     return journey;
   }
+
+  @override
+  Future<Journey?> getJourney(String journeyId) async =>
+      journeys.where((j) => j.id == journeyId).firstOrNull;
+
+  @override
+  Future<Journey> updateJourney(
+    Journey journey, {
+    required String title,
+    required String intro,
+  }) async {
+    final i = journeys.indexWhere((j) => j.id == journey.id);
+    return journeys[i] = journey.copyWith(title: title, intro: intro);
+  }
+
+  final prompts = <WeeklyPrompt>[];
+
+  @override
+  Future<WeeklyPrompt?> currentPrompt() async => prompts.lastOrNull;
+
+  @override
+  Future<WeeklyPrompt> createPrompt(Account moderator, String text) async {
+    final prompt = WeeklyPrompt(
+      id: _id(),
+      text: text.trim(),
+      createdAt: DateTime.now(),
+    );
+    prompts.add(prompt);
+    return prompt;
+  }
+
+  @override
+  Future<List<Post>> answersTo(String promptId) async =>
+      _visible.where((p) => p.promptId == promptId).toList().reversed.toList();
 
   @override
   Future<void> deleteContributions(Account account) async {
@@ -613,4 +669,221 @@ class FakeModerationRepository implements ModerationRepository {
       removeContent ? ContentStatus.removed : ContentStatus.visible,
     );
   }
+}
+
+/// In-memory events. Mirrors the capacity, waitlist and guardian rules in
+/// `firestore.rules` (via [EventRules]).
+class InMemoryEventsRepository implements EventsRepository {
+  final events = <String, SportEvent>{};
+  final rsvps = <String, Map<String, Rsvp>>{}; // eventId -> uid -> rsvp
+  final organisers = <String>{};
+  int _nextId = 0;
+
+  /// Adds an event directly, as an organiser would.
+  SportEvent add({
+    String title = 'Sunday run & brunch',
+    int capacity = 10,
+    bool adultsOnly = false,
+    Duration startsIn = const Duration(days: 7),
+  }) {
+    final id = 'e${_nextId++}';
+    final start = DateTime.now().add(startsIn);
+    return events[id] = SportEvent(
+      id: id,
+      title: title,
+      startsAt: start,
+      endsAt: start.add(const Duration(hours: 2)),
+      area: 'Kallang',
+      capacity: capacity,
+      safeguardingLead: 'Coach Lim',
+      adultsOnly: adultsOnly,
+    );
+  }
+
+  @override
+  Future<List<SportEvent>> upcoming() async => [
+    for (final e in events.values)
+      if (!e.hasStarted) e,
+  ]..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+
+  @override
+  Future<SportEvent?> getEvent(String eventId) async => events[eventId];
+
+  @override
+  Future<Rsvp?> myRsvp(String eventId, Account me) async =>
+      rsvps[eventId]?[me.uid];
+
+  @override
+  Future<Rsvp> rsvp(
+    Account me,
+    SportEvent event, {
+    bool supportPerson = false,
+    String? guardianName,
+    String? guardianPhone,
+  }) async {
+    final current = events[event.id]!;
+    if (EventRules.rsvpBlockedFor(me, current) != null) {
+      throw StateError('permission-denied');
+    }
+    final minor = EventRules.needsGuardian(me);
+    if (minor &&
+        ((guardianName ?? '').trim().length < 2 ||
+            !EventRules.validPhone(guardianPhone ?? ''))) {
+      throw StateError('permission-denied');
+    }
+    final status = current.isFull ? RsvpStatus.waitlist : RsvpStatus.going;
+    if (status == RsvpStatus.going) {
+      events[event.id] = current.copyWith(goingCount: current.goingCount + 1);
+    }
+    return (rsvps[event.id] ??= {})[me.uid] = Rsvp(
+      uid: me.uid,
+      eventId: event.id,
+      name: me.profile.name,
+      status: status,
+      createdAt: DateTime.now(),
+      supportPerson: supportPerson,
+      minor: minor,
+      guardianName: minor ? guardianName : null,
+      guardianPhone: minor ? guardianPhone : null,
+    );
+  }
+
+  @override
+  Future<Rsvp> claimSpot(Account me, SportEvent event) async {
+    final current = events[event.id]!;
+    if (current.isFull) throw StateError('Still full');
+    final old = rsvps[event.id]![me.uid]!;
+    events[event.id] = current.copyWith(goingCount: current.goingCount + 1);
+    return rsvps[event.id]![me.uid] = Rsvp(
+      uid: old.uid,
+      eventId: old.eventId,
+      name: old.name,
+      status: RsvpStatus.going,
+      createdAt: old.createdAt,
+      supportPerson: old.supportPerson,
+      minor: old.minor,
+      guardianName: old.guardianName,
+      guardianPhone: old.guardianPhone,
+    );
+  }
+
+  @override
+  Future<void> cancelRsvp(Account me, SportEvent event) async {
+    final old = rsvps[event.id]?.remove(me.uid);
+    if (old != null && old.isGoing) {
+      final current = events[event.id]!;
+      events[event.id] = current.copyWith(goingCount: current.goingCount - 1);
+    }
+  }
+
+  @override
+  Future<List<SportEvent>> attended(Account me) async => [
+    for (final e in events.values)
+      if (e.hasStarted &&
+          !e.cancelled &&
+          (rsvps[e.id]?[me.uid]?.isGoing ?? false))
+        e,
+  ]..sort((a, b) => b.startsAt.compareTo(a.startsAt));
+
+  @override
+  Future<void> cancelAllMyRsvps(Account me) async {
+    for (final id in [...rsvps.keys]) {
+      if (rsvps[id]!.containsKey(me.uid)) await cancelRsvp(me, events[id]!);
+    }
+  }
+
+  @override
+  Future<bool> isOrganiser(String uid) async => organisers.contains(uid);
+
+  @override
+  Future<SportEvent> createEvent(Account organiser, EventDraft draft) async {
+    if (!organisers.contains(organiser.uid)) {
+      throw StateError('permission-denied');
+    }
+    final id = 'e${_nextId++}';
+    return events[id] = SportEvent(
+      id: id,
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      sport: draft.sport,
+      startsAt: draft.startsAt!,
+      endsAt: draft.endsAt!,
+      area: draft.area.trim(),
+      meetingPoint: draft.meetingPoint.trim(),
+      accessibility: draft.accessibility.trim(),
+      safeguardingLead: draft.safeguardingLead.trim(),
+      capacity: draft.capacity,
+      adultsOnly: draft.adultsOnly,
+    );
+  }
+
+  @override
+  Future<void> cancelEvent(SportEvent event) async =>
+      events[event.id] = events[event.id]!.copyWith(cancelled: true);
+
+  @override
+  Future<List<Rsvp>> rsvpsFor(String eventId) async =>
+      [...?rsvps[eventId]?.values]
+        ..sort((a, b) => a.isGoing == b.isGoing ? 0 : (a.isGoing ? -1 : 1));
+}
+
+/// In-memory verification. Reviewers are listed in [reviewers].
+class FakeVerificationRepository implements VerificationRepository {
+  FakeVerificationRepository(this.profiles);
+
+  final InMemoryProfileRepository profiles;
+  final requests = <String, VerificationRequest>{};
+  final verified = <String>{};
+  final reviewers = <String>{};
+
+  @override
+  Future<bool> isVerified(String uid) async => verified.contains(uid);
+
+  @override
+  Future<VerificationRequest?> myRequest(Account me) async => requests[me.uid];
+
+  @override
+  Future<void> requestVerification(
+    Account me,
+    AthleteCategory programme, {
+    String note = '',
+  }) async {
+    if (me.profile.role != UserRole.athlete) {
+      throw StateError('permission-denied');
+    }
+    requests[me.uid] = VerificationRequest(
+      uid: me.uid,
+      athleteId: me.athleteId,
+      name: me.profile.name,
+      sport: me.profile.sportName,
+      programme: programme,
+      note: note.trim(),
+      createdAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<void> withdrawRequest(Account me) async => requests.remove(me.uid);
+
+  @override
+  Future<bool> canVerify(String uid) async => reviewers.contains(uid);
+
+  @override
+  Future<List<VerificationRequest>> pendingRequests() async => [
+    ...requests.values,
+  ];
+
+  @override
+  Future<void> approve(VerificationRequest request, Account reviewer) async {
+    if (!reviewers.contains(reviewer.uid)) {
+      throw StateError('permission-denied');
+    }
+    verified.add(request.uid);
+    requests.remove(request.uid);
+    profiles.accounts[request.uid]?.verified = true;
+  }
+
+  @override
+  Future<void> decline(VerificationRequest request) async =>
+      requests.remove(request.uid);
 }

@@ -66,8 +66,7 @@ class _SignUpFlowState extends State<SignUpFlow> {
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
-          builder: (_) =>
-              HomeShell(account: account, isNewAccount: true),
+          builder: (_) => HomeShell(account: account, isNewAccount: true),
         ),
         (_) => false,
       );
@@ -94,7 +93,9 @@ class _SignUpFlowState extends State<SignUpFlow> {
   }
 
   void _discardSignIn() {
-    Services.auth.deleteCurrentUser().catchError((_) => Services.auth.signOut());
+    Services.auth.deleteCurrentUser().catchError(
+      (_) => Services.auth.signOut(),
+    );
   }
 
   /// Leaving an unfinished, resumed sign-up.
@@ -144,12 +145,12 @@ class _SignUpFlowState extends State<SignUpFlow> {
           leading: _step > 0
               ? BackButton(onPressed: _back)
               : _resuming
-                  ? IconButton(
-                      tooltip: 'Cancel sign-up',
-                      icon: const Icon(Icons.close),
-                      onPressed: _cancelResume,
-                    )
-                  : null,
+              ? IconButton(
+                  tooltip: 'Cancel sign-up',
+                  icon: const Icon(Icons.close),
+                  onPressed: _cancelResume,
+                )
+              : null,
           title: Text(
             _resuming
                 ? 'Finish signing up · ${_step + 1} of $_stepCount'

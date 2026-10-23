@@ -6,7 +6,7 @@ import 'package:athlete_app/models/moderation.dart';
 import 'package:athlete_app/models/post.dart';
 import 'package:athlete_app/models/sign_up_data.dart';
 import 'package:athlete_app/screens/feed/compose_post_screen.dart';
-import 'package:athlete_app/screens/feed/feed_screen.dart';
+import 'package:athlete_app/screens/feed/huddle_screen.dart';
 import 'package:athlete_app/screens/feed/post_detail_screen.dart';
 import 'package:athlete_app/screens/moderation/moderation_screen.dart';
 import 'package:athlete_app/services/services.dart';
@@ -25,8 +25,10 @@ Account _account(String uid, {String name = 'Sam Taylor', int age = 25}) {
     ..dateOfBirth = DateTime(now.year - age, 1, 1)
     ..sport = 'Swimming'
     ..level = CompetitionLevel.club
-    ..topics.addAll({Topic.training, Topic.injury});
+    ..topics.addAll({Topic.training, Topic.mindset});
   return Account(
+    // Test athletes are verified unless a test says otherwise.
+    verified: true,
     uid: uid,
     athleteId: 'AA-$uid',
     profile: profile,
@@ -69,6 +71,10 @@ void main() {
     Services.profiles = InMemoryProfileRepository(auth);
     Services.feed = feed;
     Services.media = FakeMediaRepository();
+    Services.events = InMemoryEventsRepository();
+    Services.verification = FakeVerificationRepository(
+      Services.profiles as InMemoryProfileRepository,
+    );
     Services.safety = safety;
     Services.moderation = FakeModerationRepository(feed, safety);
   });
@@ -105,7 +111,7 @@ void main() {
 
     testWidgets('ask "Are you okay?" before posting', (tester) async {
       await _pump(tester, ComposePostScreen(account: _account('a')));
-      await tester.tap(find.text('Training'));
+      await tester.tap(find.text('Training wins'));
       await tester.enterText(
         find.byType(TextField).first,
         "I've been starving myself to make weight",
@@ -166,11 +172,11 @@ void main() {
     final me = _account('me');
     final other = _account('x', name: 'Alex Lee');
     await _post(other, text: 'Post from Alex');
-    await _pump(tester, FeedScreen(account: me));
+    await _pump(tester, HuddleScreen(account: me, onCompose: (_) {}));
     expect(find.text('Post from Alex'), findsOneWidget);
 
     await safety.block(me, Author.of(other));
-    await _pump(tester, FeedScreen(account: me));
+    await _pump(tester, HuddleScreen(account: me, onCompose: (_) {}));
     expect(find.text('Post from Alex'), findsNothing);
   });
 
@@ -189,11 +195,14 @@ void main() {
     expect(safety.reports.values.single.reason, ReportReason.unsafeAdvice);
   });
 
-  testWidgets('muted topics drop out of the feed tabs', (tester) async {
-    final me = _account('me')..profile.mutedTopics.add(Topic.injury);
-    await _pump(tester, FeedScreen(account: me));
-    expect(find.widgetWithText(Tab, 'Training'), findsOneWidget);
-    expect(find.widgetWithText(Tab, 'Injury'), findsNothing);
+  testWidgets('muted categories drop out of Huddle', (tester) async {
+    final me = _account('me')..profile.mutedTopics.add(Topic.mindset);
+    await _pump(tester, HuddleScreen(account: me, onCompose: (_) {}));
+    expect(
+      find.widgetWithText(ChoiceChip, '🏋️ Training wins'),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(ChoiceChip, '🧠 Mindset'), findsNothing);
   });
 
   testWidgets('moderators approve held posts', (tester) async {

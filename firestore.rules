@@ -298,6 +298,24 @@ service cloud.firestore {
         && request.resource.data.status in ['visible', 'held', 'removed'];
     }
 
+    // ----- Verification (step 3): moderators or organisers verify
+    // national, Paralympic and Special Olympics athletes.
+
+    function isVerified(uid) {
+      return exists(/databases/$(database)/documents/verifiedAthletes/$(uid));
+    }
+
+    function isReviewer() {
+      return isModerator() || isOrganiser();
+    }
+
+    // The ✓ on a post or reply must be true exactly when the writer is
+    // verified (anonymous posts leave it out).
+    function verifiedFlagMatches(d) {
+      return !d.keys().hasAny(['authorVerified'])
+        || d.authorVerified == isVerified(request.auth.uid);
+    }
+
     function canRespondTo(postId, p, minor) {
       let target = get(postPath(postId)).data;
       return target.replyPolicy != 'none'
@@ -314,16 +332,27 @@ service cloud.firestore {
           'authorSport', 'authorLevel', 'authorCategory', 'journeyId',
           'journeyTitle', 'media', 'responseCount', 'respondsToId',
           'respondsToText', 'status', 'holdReason', 'reportCount',
-          'adultRepliesAllowed', 'tags'])
+          'adultRepliesAllowed', 'tags', 'authorVerified', 'promptId',
+          'promptText'])
+        // Spotlights come from verified athletes; anyone can ask.
+        && (d.type == 'question' || isVerified(request.auth.uid))
+        && verifiedFlagMatches(d)
+        // Answering the weekly Huddle question.
+        && (!d.keys().hasAny(['promptId'])
+            || (d.promptText is string && d.promptText.size() <= 200
+                && exists(/databases/$(database)/documents/prompts/$(d.promptId))))
         && validTags(d.get('tags', []))
         && d.type in ['experience', 'question']
         // General public members can only ask questions.
         && (p.role == 'athlete' || d.type == 'question')
-        && d.topic in ['injury', 'training', 'nutrition', 'competition']
-        // Held for a moderator: flagged words; under-18 nutrition posts and
-        // videos; adults responding to an under-18 who allowed adult replies.
+        // Huddle categories (the old problem-focused topics are retired).
+        && d.topic in ['training', 'mindset', 'gameDay', 'teamLife']
+        // Held for a moderator: flagged words; under-18 videos; adults
+        // responding to an under-18 who allowed adult replies.
+        // Every "Ask an athlete" question is checked before it appears.
         && validStatus(d, postFlagged(d)
-             || (minor && (d.topic == 'nutrition' || hasVideo(d.get('media', []))))
+             || d.type == 'question'
+             || (minor && hasVideo(d.get('media', [])))
              || (d.keys().hasAny(['respondsToId']) && !minor
                  && get(postPath(d.respondsToId)).data.minorAuthor))
         // Only under-18s can open their posts to adult replies.
@@ -359,8 +388,12 @@ service cloud.firestore {
       return d.keys().hasOnly(['authorUid', 'authorName', 'authorSport',
           'authorLevel', 'authorCategory', 'authorRole', 'minorAuthor', 'text',
           'createdAt', 'helpfulCount', 'helpedAsker', 'parentReplyId',
-          'status', 'holdReason', 'reportCount'])
+          'status', 'holdReason', 'reportCount', 'authorVerified'])
         && authorMatches(d)
+        && verifiedFlagMatches(d)
+        // "Ask an athlete": verified athletes answer; the asker can reply.
+        && (post.type != 'question' || isVerified(request.auth.uid)
+            || isPostAuthor(postId))
         && d.authorRole == p.role
         && d.minorAuthor == minor
         && d.text is string && d.text.size() > 0 && d.text.size() <= 1000
@@ -541,15 +574,209 @@ service cloud.firestore {
         && (resource == null || resource.data.reporterUid == request.auth.uid);
     }
 
+    // ---------------------------------------------------------------------
+    // Events: in-person social sporting events. Organisers create them;
+    // members RSVP. See docs/events.md. Mirrored in the app by EventRules.
+    // ---------------------------------------------------------------------
+
+    // Listed in organisers/{uid}, added by hand in the Firebase console.
+    function isOrganiser() {
+      return signedIn() && exists(/databases/$(database)/documents/organisers/$(request.auth.uid));
+    }
+
+    function eventPath(eventId) {
+      return /databases/$(database)/documents/events/$(eventId);
+    }
+
+    function rsvpPath(eventId, uid) {
+      return /databases/$(database)/documents/events/$(eventId)/rsvps/$(uid);
+    }
+
+    function validEvent(d) {
+      return d.keys().hasOnly(['title', 'description', 'sport', 'startsAt',
+          'endsAt', 'area', 'meetingPoint', 'accessibility',
+          'safeguardingLead', 'capacity', 'goingCount', 'adultsOnly',
+          'cancelled', 'createdBy', 'createdAt'])
+        && d.title is string && d.title.size() > 2 && d.title.size() <= 80
+        && d.description is string && d.description.size() <= 2000
+        && (d.sport == null || (d.sport is string && d.sport.size() <= 40))
+        && d.startsAt is timestamp && d.endsAt is timestamp
+        && d.endsAt > d.startsAt
+        && d.area is string && d.area.size() > 0 && d.area.size() <= 80
+        && d.meetingPoint is string && d.meetingPoint.size() <= 200
+        && d.accessibility is string && d.accessibility.size() <= 500
+        // Every event names who is responsible for safety on the day.
+        && d.safeguardingLead is string && d.safeguardingLead.size() > 1
+        && d.safeguardingLead.size() <= 80
+        && d.capacity is int && d.capacity >= 1 && d.capacity <= 500
+        && d.goingCount is int && d.goingCount >= 0
+        && d.capacity >= d.goingCount
+        && d.adultsOnly is bool && d.cancelled is bool;
+    }
+
+    // goingCount moves by one together with the requester's own RSVP
+    // becoming (or stopping being) 'going', and never past capacity.
+    function goingMoved(eventId) {
+      let before = resource.data.goingCount;
+      let after = request.resource.data.goingCount;
+      let rsvp = rsvpPath(eventId, request.auth.uid);
+      let wasGoing = exists(rsvp) && get(rsvp).data.status == 'going';
+      let isGoing = existsAfter(rsvp) && getAfter(rsvp).data.status == 'going';
+      return onlyChanged(['goingCount'])
+        && ((after == before + 1 && after <= resource.data.capacity
+              && !wasGoing && isGoing)
+            || (after == before - 1 && wasGoing && !isGoing));
+    }
+
+    function validRsvp(eventId, d) {
+      let event = get(eventPath(eventId)).data;
+      let after = getAfter(eventPath(eventId)).data;
+      let minor = isMinor(request.auth.uid);
+      return d.keys().hasOnly(['uid', 'name', 'status', 'supportPerson',
+          'minor', 'guardianName', 'guardianPhone', 'guardianConsent',
+          'createdAt'])
+        && d.uid == request.auth.uid
+        && d.name == get(userPath(request.auth.uid)).data.name
+        && d.supportPerson is bool
+        && d.createdAt == request.time
+        && d.minor == minor
+        && event.cancelled == false && event.startsAt > request.time
+        && (!event.adultsOnly || !minor)
+        // Under-18s need a parent or guardian's consent and contact; adults
+        // don't store any guardian details.
+        && (minor
+              ? (d.guardianName is string && d.guardianName.size() > 1
+                  && d.guardianName.size() <= 80
+                  && d.guardianPhone is string
+                  && d.guardianPhone.matches('[+0-9 ]{8,16}')
+                  && d.guardianConsent == true)
+              : !d.keys().hasAny(['guardianName', 'guardianPhone',
+                  'guardianConsent']))
+        // A spot if there is one; otherwise the waitlist.
+        && ((d.status == 'going' && after.goingCount == event.goingCount + 1)
+            || (d.status == 'waitlist' && event.goingCount >= event.capacity
+                && after.goingCount == event.goingCount));
+    }
+
+    match /organisers/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, write: if false;
+    }
+
+    match /events/{eventId} {
+      allow get, list: if signedIn();
+      allow create: if isOrganiser()
+        && validEvent(request.resource.data)
+        && request.resource.data.goingCount == 0
+        && request.resource.data.cancelled == false
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.startsAt > request.time;
+      allow update: if signedIn() && (
+        goingMoved(eventId)
+        || (isOrganiser() && validEvent(request.resource.data)
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['goingCount', 'createdBy', 'createdAt'])));
+      // Events are cancelled, never deleted, so RSVPs can still be found.
+      allow delete: if false;
+
+      match /rsvps/{uid} {
+        allow get: if signedIn() && (request.auth.uid == uid || isOrganiser());
+        allow list: if isOrganiser();
+        allow create: if signedIn() && request.auth.uid == uid
+          && validRsvp(eventId, request.resource.data);
+        // Taking a spot that opened up, from the waitlist.
+        allow update: if signedIn() && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status'])
+          && resource.data.status == 'waitlist'
+          && request.resource.data.status == 'going'
+          && getAfter(eventPath(eventId)).data.goingCount
+               == get(eventPath(eventId)).data.goingCount + 1;
+        // Cancelling: a 'going' RSVP frees its spot in the same write,
+        // unless the event has already started (then it's just removed,
+        // e.g. by account deletion).
+        allow delete: if signedIn() && (resource == null
+          || (request.auth.uid == uid
+              && (resource.data.status != 'going'
+                  || get(eventPath(eventId)).data.startsAt <= request.time
+                  || getAfter(eventPath(eventId)).data.goingCount
+                       == get(eventPath(eventId)).data.goingCount - 1)));
+      }
+    }
+
+    // Verified athletes: readable by members (for the ✓), written by
+    // reviewers, deleted by reviewers or with the athlete's account.
+    match /verifiedAthletes/{uid} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update: if isReviewer()
+        && request.resource.data.keys().hasOnly(['programme', 'verifiedBy',
+             'verifiedAt'])
+        && request.resource.data.programme in ['national', 'paralympic',
+             'specialOlympics']
+        && request.resource.data.verifiedBy == request.auth.uid
+        && request.resource.data.verifiedAt == request.time
+        && get(userPath(uid)).data.role == 'athlete';
+      allow delete: if signedIn()
+        && (request.auth.uid == uid || isReviewer());
+    }
+
+    // An athlete asking to be verified, one per athlete.
+    match /verificationRequests/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isReviewer());
+      allow list: if isReviewer();
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['athleteId', 'name', 'sport',
+             'programme', 'note', 'createdAt'])
+        && get(userPath(uid)).data.role == 'athlete'
+        && request.resource.data.athleteId == get(userPath(uid)).data.athleteId
+        && request.resource.data.name == get(userPath(uid)).data.name
+        && request.resource.data.programme in ['national', 'paralympic',
+             'specialOlympics']
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 300
+        && request.resource.data.createdAt == request.time;
+      allow delete: if signedIn()
+        && (resource == null || request.auth.uid == uid || isReviewer());
+    }
+
+    // The weekly Huddle question (step 4), set by moderators.
+    match /prompts/{promptId} {
+      allow get, list: if signedIn();
+      allow create: if isModerator()
+        && request.resource.data.keys().hasOnly(['text', 'createdBy',
+             'createdAt'])
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 5
+        && request.resource.data.text.size() <= 200
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow delete: if isModerator();
+    }
+
+    // Journeys are stories: a title and intro, with posts as chapters.
     match /journeys/{journeyId} {
       allow get, list: if signedIn();
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['ownerUid', 'title', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['ownerUid', 'title', 'intro',
+             'createdAt'])
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0
         && request.resource.data.title.size() <= 60
+        && request.resource.data.get('intro', '') is string
+        && request.resource.data.get('intro', '').size() <= 500
         && request.resource.data.createdAt == request.time;
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['title', 'intro'])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 60
+        && request.resource.data.intro is string
+        && request.resource.data.intro.size() <= 500;
       allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
     }
   }

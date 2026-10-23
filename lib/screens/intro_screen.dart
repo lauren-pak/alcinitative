@@ -25,8 +25,9 @@ class IntroScreen extends StatelessWidget {
                 avatar: const Icon(Icons.text_increase, size: 18),
                 label: const Text('Easy mode'),
                 selected: mode == DisplayMode.easy,
-                onSelected: (on) => displayMode.value =
-                    on ? DisplayMode.easy : DisplayMode.standard,
+                onSelected: (on) => displayMode.value = on
+                    ? DisplayMode.easy
+                    : DisplayMode.standard,
               ),
             ),
           ),
@@ -62,39 +63,43 @@ class IntroScreen extends StatelessWidget {
               const _Feature(
                 icon: Icons.edit_note,
                 title: 'Share your journey',
-                body: 'Post updates and videos about injury, training, '
+                body:
+                    'Post updates and videos about injury, training, '
                     'sports nutrition and competition.',
               ),
               const _Feature(
                 icon: Icons.forum_outlined,
                 title: 'Learn from each other',
-                body: 'Get advice from athletes in your sport, and pass on '
+                body:
+                    'Get advice from athletes in your sport, and pass on '
                     'what worked for you.',
               ),
               const _Feature(
                 icon: Icons.diversity_3_outlined,
                 title: 'For every athlete',
-                body: 'National, Paralympic and Special Olympics athletes, '
+                body:
+                    'National, Paralympic and Special Olympics athletes, '
                     'from school level to elite.',
               ),
               const _Feature(
                 icon: Icons.shield_outlined,
                 title: 'Safe by design',
-                body: 'Extra protections for under-18s, and easy ways to '
+                body:
+                    'Extra protections for under-18s, and easy ways to '
                     "report anything that doesn't feel right.",
               ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SignUpFlow()),
-                ),
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const SignUpFlow())),
                 child: const Text('Get started'),
               ),
               const SizedBox(height: 8),
               TextButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                ),
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const LoginScreen())),
                 child: const Text('I already have an account'),
               ),
             ],

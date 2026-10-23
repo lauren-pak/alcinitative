@@ -3,8 +3,10 @@ import 'media.dart';
 import 'moderation.dart';
 import 'sign_up_data.dart';
 
+/// Huddle has two kinds of post: a Spotlight (an athlete sharing a moment
+/// from their journey) and a question for "Ask an athlete".
 enum PostType {
-  experience('Experience'),
+  experience('Spotlight'),
   question('Question');
 
   const PostType(this.label);
@@ -31,6 +33,7 @@ class Author {
     this.sport,
     this.level,
     this.category,
+    this.verified = false,
   });
 
   /// From an account, using only ID-card fields (never date of birth).
@@ -43,6 +46,7 @@ class Author {
       sport: p.role == UserRole.athlete ? p.sportName : null,
       level: p.level,
       category: p.category,
+      verified: account.verified,
     );
   }
 
@@ -52,6 +56,9 @@ class Author {
   final String? sport;
   final CompetitionLevel? level;
   final AthleteCategory? category;
+
+  /// A verified national, Paralympic or Special Olympics athlete (✓).
+  final bool verified;
 
   /// e.g. "Swimming · Club" or "General public".
   String get subtitle => role == UserRole.athlete && sport != null
@@ -81,6 +88,8 @@ class Post {
     this.adultRepliesAllowed = false,
     this.tags = const [],
     this.editedAt,
+    this.promptId,
+    this.promptText,
     this.answered = false,
     this.replyCount = 0,
     this.responseCount = 0,
@@ -129,6 +138,10 @@ class Post {
   /// When the author last edited the text or tags; null if never.
   final DateTime? editedAt;
 
+  /// The weekly Huddle question this post answers, if any.
+  final String? promptId;
+  final String? promptText;
+
   /// A question whose asker marked a reply "This helped me".
   final bool answered;
   final int replyCount;
@@ -145,18 +158,17 @@ class Post {
   /// Label for the post's author line.
   String get authorName => author?.name ?? 'Anonymous ${_roleNoun()}';
 
-  String _roleNoun() =>
-      authorRole == UserRole.athlete ? 'athlete' : 'member';
+  String _roleNoun() => authorRole == UserRole.athlete ? 'athlete' : 'member';
 
   /// Questions from general public members are labelled as such.
-  String get typeLabel => type == PostType.question &&
-          authorRole == UserRole.public
+  String get typeLabel =>
+      type == PostType.question && authorRole == UserRole.public
       ? 'Question from the public'
       : type.label;
 
-  /// Injury and nutrition posts carry a "not medical advice" banner.
-  bool get needsAdviceBanner =>
-      topic == Topic.injury || topic == Topic.nutrition;
+  /// "Ask an athlete" questions carry an "experience, not professional
+  /// advice" banner over their answers.
+  bool get needsAdviceBanner => type == PostType.question;
 
   Post copyWith({
     String? text,
@@ -169,33 +181,34 @@ class Post {
     int? beenThereCount,
     ContentStatus? status,
     int? reportCount,
-  }) =>
-      Post(
-        id: id,
-        type: type,
-        topic: topic,
-        text: text ?? this.text,
-        createdAt: createdAt,
-        author: author,
-        authorRole: authorRole,
-        minorAuthor: minorAuthor,
-        replyPolicy: replyPolicy,
-        journeyId: journeyId,
-        journeyTitle: journeyTitle,
-        media: media,
-        respondsToId: respondsToId,
-        respondsToText: respondsToText,
-        status: status ?? this.status,
-        holdReason: holdReason ?? this.holdReason,
-        reportCount: reportCount ?? this.reportCount,
-        adultRepliesAllowed: adultRepliesAllowed,
-        tags: tags ?? this.tags,
-        editedAt: editedAt ?? this.editedAt,
-        answered: answered ?? this.answered,
-        replyCount: replyCount ?? this.replyCount,
-        responseCount: responseCount ?? this.responseCount,
-        beenThereCount: beenThereCount ?? this.beenThereCount,
-      );
+  }) => Post(
+    id: id,
+    type: type,
+    topic: topic,
+    text: text ?? this.text,
+    createdAt: createdAt,
+    author: author,
+    authorRole: authorRole,
+    minorAuthor: minorAuthor,
+    replyPolicy: replyPolicy,
+    journeyId: journeyId,
+    journeyTitle: journeyTitle,
+    media: media,
+    respondsToId: respondsToId,
+    respondsToText: respondsToText,
+    status: status ?? this.status,
+    holdReason: holdReason ?? this.holdReason,
+    reportCount: reportCount ?? this.reportCount,
+    adultRepliesAllowed: adultRepliesAllowed,
+    tags: tags ?? this.tags,
+    editedAt: editedAt ?? this.editedAt,
+    promptId: promptId,
+    promptText: promptText,
+    answered: answered ?? this.answered,
+    replyCount: replyCount ?? this.replyCount,
+    responseCount: responseCount ?? this.responseCount,
+    beenThereCount: beenThereCount ?? this.beenThereCount,
+  );
 }
 
 class Reply {
@@ -239,31 +252,64 @@ class Reply {
     bool? helpedAsker,
     ContentStatus? status,
     int? reportCount,
-  }) =>
-      Reply(
-        id: id,
-        postId: postId,
-        parentReplyId: parentReplyId,
-        status: status ?? this.status,
-        holdReason: holdReason,
-        reportCount: reportCount ?? this.reportCount,
-        author: author,
-        minorAuthor: minorAuthor,
-        text: text,
-        createdAt: createdAt,
-        helpfulCount: helpfulCount ?? this.helpfulCount,
-        helpedAsker: helpedAsker ?? this.helpedAsker,
-      );
+  }) => Reply(
+    id: id,
+    postId: postId,
+    parentReplyId: parentReplyId,
+    status: status ?? this.status,
+    holdReason: holdReason,
+    reportCount: reportCount ?? this.reportCount,
+    author: author,
+    minorAuthor: minorAuthor,
+    text: text,
+    createdAt: createdAt,
+    helpfulCount: helpfulCount ?? this.helpfulCount,
+    helpedAsker: helpedAsker ?? this.helpedAsker,
+  );
 }
 
 /// A named playlist of someone's posts, e.g. "ACL rehab 2026".
+/// Shared as a story: an intro, then the posts as chapters, so athletes
+/// can follow (and be inspired by) someone's path.
 class Journey {
-  const Journey({required this.id, required this.ownerUid, required this.title});
+  const Journey({
+    required this.id,
+    required this.ownerUid,
+    required this.title,
+    this.intro = '',
+  });
 
   final String id;
   final String ownerUid;
   final String title;
+
+  /// "Where it started", shown at the top of the story. Up to 500 letters.
+  final String intro;
+
+  Journey copyWith({String? title, String? intro}) => Journey(
+    id: id,
+    ownerUid: ownerUid,
+    title: title ?? this.title,
+    intro: intro ?? this.intro,
+  );
 }
+
+/// The weekly Huddle question, set by a moderator, e.g. "What do you do
+/// the night before a big competition?".
+class WeeklyPrompt {
+  const WeeklyPrompt({
+    required this.id,
+    required this.text,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String text;
+  final DateTime createdAt;
+}
+
+const maxPromptLength = 200;
+const maxJourneyIntroLength = 500;
 
 /// What a member is writing in the composer.
 class NewPost {
@@ -285,6 +331,9 @@ class NewPost {
 
   /// Search tags, already normalised (see [normaliseTag]).
   List<String> tags = [];
+
+  /// Answering this week's Huddle question.
+  WeeklyPrompt? prompt;
 }
 
 /// Most tags a post can have.
@@ -311,28 +360,30 @@ class FeedRules {
   static bool isMinor(Account a) => a.profile.isMinorOn(DateTime.now());
 
   /// General public members can only ask questions.
+  /// Anyone can ask; only verified athletes share spotlights.
   static List<PostType> postTypesFor(Account a) =>
-      a.profile.role == UserRole.public
-          ? const [PostType.question]
-          : PostType.values;
+      a.verified ? PostType.values : const [PostType.question];
 
-  /// Shown when a choice means the post waits for a moderator.
-  static String? topicReviewNoteFor(Account a, Topic topic) =>
-      topic == Topic.nutrition && isMinor(a)
-          ? 'Sports nutrition posts from under-18s are checked by a '
-              'moderator before others can see them.'
-          : null;
+  /// Why [a] can't share a spotlight yet, or null if they can.
+  static String? spotlightBlockedFor(Account a) => a.verified
+      ? null
+      : a.profile.role == UserRole.athlete
+      ? 'Spotlights are shared by verified national, Paralympic and '
+            'Special Olympics athletes. Ask to be verified in Settings.'
+      : 'Spotlights are shared by verified athletes. You can ask them '
+            'questions in "Ask an athlete".';
 
   /// Why [draft] would wait for a moderator, or null if it goes straight
   /// into the feed. Mirrors `postHoldReason` in `firestore.rules`.
   static HoldReason? holdReasonFor(Account a, NewPost draft) {
     if (flagged(draft.text, draft.tags)) return HoldReason.flaggedWords;
+    // Every question is checked before it appears.
+    if (draft.type == PostType.question) return HoldReason.newQuestion;
     if (!isMinor(a)) {
       return draft.respondingTo?.minorAuthor ?? false
           ? HoldReason.adultReplyToMinor
           : null;
     }
-    if (draft.topic == Topic.nutrition) return HoldReason.minorNutrition;
     if (draft.media.any((m) => m.kind == MediaKind.video)) {
       return HoldReason.minorVideo;
     }
@@ -346,13 +397,19 @@ class FeedRules {
   /// An edit that adds flagged words sends a visible post back for review.
   /// Held and removed posts stay as they are.
   static HoldReason? editHoldReasonFor(
-          Post post, String text, List<String> tags) =>
-      post.status == ContentStatus.visible && flagged(text, tags)
-          ? HoldReason.flaggedWords
-          : null;
+    Post post,
+    String text,
+    List<String> tags,
+  ) => post.status == ContentStatus.visible && flagged(text, tags)
+      ? HoldReason.flaggedWords
+      : null;
 
   /// Why a reply would wait for a moderator. Mirrors `firestore.rules`.
-  static HoldReason? replyHoldReasonFor(Account viewer, Post post, String text) {
+  static HoldReason? replyHoldReasonFor(
+    Account viewer,
+    Post post,
+    String text,
+  ) {
     if (containsFlaggedWords(text)) return HoldReason.flaggedWords;
     if (post.minorAuthor && !isMinor(viewer)) {
       return HoldReason.adultReplyToMinor;
@@ -363,13 +420,25 @@ class FeedRules {
   /// Under-18 videos are checked by a person before going live.
   static String? videoReviewNoteFor(Account a) => isMinor(a)
       ? 'Videos from under-18s are checked by a moderator before others '
-          'can see them.'
+            'can see them.'
       : null;
 
   /// Null if [viewer] may reply to [post], or to [parent] within it.
   /// Response posts follow the same rules as replies.
-  static String? replyBlockedFor(Account viewer, Post post, {Reply? parent}) {
+  /// [isMine]: the viewer wrote [post] (the asker can always reply to
+  /// their own question).
+  static String? replyBlockedFor(
+    Account viewer,
+    Post post, {
+    Reply? parent,
+    bool isMine = false,
+  }) {
     if (post.replyPolicy == ReplyPolicy.none) return 'Replies are turned off.';
+    // "Ask an athlete": answers come from verified athletes.
+    if (post.type == PostType.question && !viewer.verified && !isMine) {
+      return 'Questions are answered by verified athletes. You can still '
+          'say "Been there".';
+    }
     if (post.replyPolicy == ReplyPolicy.athletes &&
         viewer.profile.role != UserRole.athlete) {
       return 'Only athletes can reply to this post.';

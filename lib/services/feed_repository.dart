@@ -6,8 +6,12 @@ import '../models/sign_up_data.dart';
 /// in tests. Permission checks live in `firestore.rules`; the app mirrors
 /// them with `FeedRules`.
 abstract class FeedRepository {
-  /// Newest posts in [topics].
-  Future<List<Post>> latest(Set<Topic> topics, {int limit = 30});
+  /// Newest posts in [topics], optionally only of one [type].
+  Future<List<Post>> latest(
+    Set<Topic> topics, {
+    int limit = 30,
+    PostType? type,
+  });
 
   /// Unanswered questions in [topics], newest first.
   Future<List<Post>> needsAnswer(Set<Topic> topics, {int limit = 5});
@@ -24,13 +28,21 @@ abstract class FeedRepository {
   Future<List<Reply>> replies(String postId, {Account? viewer});
 
   /// [parent] makes it a reply to another reply (a nested thread).
-  Future<Reply> addReply(Account author, Post post, String text,
-      {Reply? parent});
+  Future<Reply> addReply(
+    Account author,
+    Post post,
+    String text, {
+    Reply? parent,
+  });
 
   /// Changes the text and tags of [author]'s own post. An edit that adds
   /// flagged words holds the post for a moderator again.
-  Future<Post> editPost(Account author, Post post,
-      {required String text, required List<String> tags});
+  Future<Post> editPost(
+    Account author,
+    Post post, {
+    required String text,
+    required List<String> tags,
+  });
 
   /// Deletes [author]'s own post, its photos and videos, and its private
   /// author link.
@@ -54,8 +66,11 @@ abstract class FeedRepository {
   Future<void> setBeenThere(Post post, Account viewer, bool on);
 
   /// IDs of the replies on [postId] that [viewer] marked Helpful.
-  Future<Set<String>> myHelpful(String postId, List<Reply> replies,
-      Account viewer);
+  Future<Set<String>> myHelpful(
+    String postId,
+    List<Reply> replies,
+    Account viewer,
+  );
 
   Future<void> setHelpful(Reply reply, Account viewer, bool on);
 
@@ -63,6 +78,24 @@ abstract class FeedRepository {
   Future<void> markHelpedAsker(Post post, Reply reply);
 
   Future<List<Journey>> myJourneys(Account owner);
+
+  Future<Journey?> getJourney(String journeyId);
+
+  /// The owner changes the story's title and intro.
+  Future<Journey> updateJourney(
+    Journey journey, {
+    required String title,
+    required String intro,
+  });
+
+  /// This week's Huddle question (the newest one), or null.
+  Future<WeeklyPrompt?> currentPrompt();
+
+  /// Moderators set a new weekly question.
+  Future<WeeklyPrompt> createPrompt(Account moderator, String text);
+
+  /// Visible posts answering [promptId], newest first.
+  Future<List<Post>> answersTo(String promptId);
 
   Future<Journey> createJourney(Account owner, String title);
 

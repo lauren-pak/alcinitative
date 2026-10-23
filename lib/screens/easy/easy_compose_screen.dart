@@ -33,10 +33,14 @@ class EasyComposeScreen extends StatefulWidget {
     this.initialVideo,
     this.initialPhotos = const [],
     this.respondingTo,
+    this.prompt,
   });
 
   final Account account;
   final Post? respondingTo;
+
+  /// Answering this week's Huddle question: always a story (spotlight).
+  final WeeklyPrompt? prompt;
 
   /// Captured on the camera screen, already cleaned.
   final PreparedVideo? initialVideo;
@@ -62,6 +66,8 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
   /// Answers to a post skip both questions.
   List<_Step> get _steps => widget.respondingTo != null
       ? const [_Step.write, _Step.tags, _Step.check]
+      : widget.prompt != null
+      ? const [_Step.topic, _Step.write, _Step.tags, _Step.check]
       : FeedRules.postTypesFor(_account).length > 1
       ? _Step.values
       : const [_Step.topic, _Step.write, _Step.tags, _Step.check];
@@ -72,6 +78,11 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
   void initState() {
     super.initState();
     _draft.type = FeedRules.postTypesFor(_account).first;
+    if (widget.prompt case final prompt?) {
+      _draft
+        ..prompt = prompt
+        ..type = PostType.experience;
+    }
     _video = widget.initialVideo;
     _photos.addAll(widget.initialPhotos);
     if (widget.respondingTo case final target?) {
@@ -257,16 +268,6 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
               ),
           ],
         ),
-        if (_draft.topic != null &&
-            FeedRules.topicReviewNoteFor(_account, _draft.topic!) != null) ...[
-          const SizedBox(height: 12),
-          const EasyNote(
-            text:
-                'A helper will check your post about food before others '
-                'see it.',
-            icon: Icons.verified_user_outlined,
-          ),
-        ],
       ],
     );
   }
@@ -294,7 +295,7 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
               Expanded(
                 child: EasyTile(
                   icon: Icons.help_outline,
-                  label: 'Ask a question',
+                  label: 'Ask an athlete',
                   selected: _draft.type == PostType.question,
                   onTap: () => setState(() => _draft.type = PostType.question),
                 ),
@@ -314,6 +315,10 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
       children: [
         if (target != null) ...[
           _AnsweringNote(post: target),
+          const SizedBox(height: 16),
+        ],
+        if (widget.prompt case final prompt?) ...[
+          PromptLine(text: prompt.text),
           const SizedBox(height: 16),
         ],
         Text(
@@ -395,10 +400,16 @@ class _EasyComposeScreenState extends State<EasyComposeScreen> {
 
   /// Easy tag ideas for each topic.
   static const _tagIdeas = {
-    Topic.injury: ['knee', 'ankle', 'shoulder', 'rehab', 'recovery'],
-    Topic.training: ['strength', 'running', 'stretching', 'teamwork', 'coach'],
-    Topic.nutrition: ['water', 'breakfast', 'snacks', 'energy', 'raceday'],
-    Topic.competition: ['nerves', 'medal', 'warmup', 'teamwork', 'travel'],
+    Topic.training: [
+      'strength',
+      'drills',
+      'stretching',
+      'personalbest',
+      'coach',
+    ],
+    Topic.mindset: ['confidence', 'focus', 'nerves', 'gratitude', 'goals'],
+    Topic.gameDay: ['warmup', 'medal', 'routine', 'travel', 'raceday'],
+    Topic.teamLife: ['teammates', 'friends', 'school', 'family', 'fun'],
   };
 
   void _toggleTag(String tag) => setState(() {

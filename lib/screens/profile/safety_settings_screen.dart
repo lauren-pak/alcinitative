@@ -17,8 +17,9 @@ class SafetySettingsScreen extends StatefulWidget {
 }
 
 class _SafetySettingsScreenState extends State<SafetySettingsScreen> {
-  late Future<List<BlockedMember>> _blocked =
-      Services.safety.blockedMembers(widget.account);
+  late Future<List<BlockedMember>> _blocked = Services.safety.blockedMembers(
+    widget.account,
+  );
   bool _saving = false;
 
   Set<Topic> get _muted => widget.account.profile.mutedTopics;
@@ -33,9 +34,11 @@ class _SafetySettingsScreenState extends State<SafetySettingsScreen> {
     } catch (_) {
       setState(() => mute ? _muted.remove(topic) : _muted.add(topic));
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Couldn't save. Check your connection."),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't save. Check your connection."),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -53,9 +56,11 @@ class _SafetySettingsScreenState extends State<SafetySettingsScreen> {
     } catch (_) {
       setState(() => profile.findable = !on);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Couldn't save. Check your connection."),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't save. Check your connection."),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -65,17 +70,20 @@ class _SafetySettingsScreenState extends State<SafetySettingsScreen> {
   Future<void> _unblock(BlockedMember member) async {
     await Services.safety.unblock(widget.account, member.uid);
     if (!mounted) return;
-    setState(() => _blocked = Services.safety.blockedMembers(widget.account));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('You unblocked ${member.name}.')),
-    );
+    setState(() {
+      _blocked = Services.safety.blockedMembers(widget.account);
+    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('You unblocked ${member.name}.')));
   }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final canBeFindable =
-        widget.account.profile.canBeFindableOn(DateTime.now());
+    final canBeFindable = widget.account.profile.canBeFindableOn(
+      DateTime.now(),
+    );
     return Scaffold(
       appBar: AppBar(title: const Text('Safety & privacy')),
       body: ListView(
@@ -110,12 +118,12 @@ class _SafetySettingsScreenState extends State<SafetySettingsScreen> {
             subtitle: Text(
               canBeFindable
                   ? 'Members can find your ID card by searching your name or '
-                      'browsing by sport and programme. Off: only people you '
-                      'give your athlete ID to can find you.'
+                        'browsing by sport and programme. Off: only people you '
+                        'give your athlete ID to can find you.'
                   : widget.account.profile.role == UserRole.athlete
-                      ? "Under-18s can't be found in search, to keep you safe. "
-                          'Share your athlete ID instead.'
-                      : 'Only athletes can be found by name.',
+                  ? "Under-18s can't be found in search, to keep you safe. "
+                        'Share your athlete ID instead.'
+                  : 'Only athletes can be found by name.',
             ),
             value: widget.account.profile.findable && canBeFindable,
             onChanged: canBeFindable && !_saving ? _setFindable : null,

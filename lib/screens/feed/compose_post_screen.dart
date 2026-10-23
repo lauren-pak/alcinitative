@@ -23,9 +23,17 @@ class ComposePostScreen extends StatefulWidget {
     this.respondingTo,
     this.initialVideo,
     this.initialPhotos = const [],
+    this.initialType,
+    this.prompt,
   });
 
   final Account account;
+
+  /// Answering this week's Huddle question (always a spotlight).
+  final WeeklyPrompt? prompt;
+
+  /// Start as a Spotlight or an "Ask an athlete" question.
+  final PostType? initialType;
 
   /// Captured on the camera screen, already cleaned.
   final PreparedVideo? initialVideo;
@@ -62,9 +70,17 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
   @override
   void initState() {
     super.initState();
-    _draft.type = FeedRules.postTypesFor(_account).first;
+    final types = FeedRules.postTypesFor(_account);
+    _draft.type = types.contains(widget.initialType)
+        ? widget.initialType!
+        : types.first;
     _video = widget.initialVideo;
     _photos.addAll(widget.initialPhotos);
+    if (widget.prompt case final prompt?) {
+      _draft
+        ..prompt = prompt
+        ..type = PostType.experience;
+    }
     final target = widget.respondingTo;
     if (target != null) {
       _draft
@@ -119,8 +135,10 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
       final video = await prepareVideo(picked.path);
       if (!mounted) return;
       if (video.durationMs > maxVideoDuration.inMilliseconds + 1000) {
-        _showError('Videos can be up to ${maxVideoDuration.inSeconds} '
-            'seconds long. Trim it in Photos first.');
+        _showError(
+          'Videos can be up to ${maxVideoDuration.inSeconds} '
+          'seconds long. Trim it in Photos first.',
+        );
         return;
       }
       setState(() => _video = video);
@@ -252,11 +270,13 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.respondingTo != null
-            ? 'Respond with a post'
-            : _isAthlete
-                ? 'New post'
-                : 'Ask a question'),
+        title: Text(
+          widget.respondingTo != null
+              ? 'Respond with a post'
+              : _isAthlete
+              ? 'New post'
+              : 'Ask a question',
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -274,6 +294,10 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              if (widget.prompt case final prompt?) ...[
+                PromptLine(text: prompt.text),
+                const SizedBox(height: 16),
+              ],
               if (widget.respondingTo case final target?) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -301,7 +325,7 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                     ButtonSegment(
                       value: PostType.experience,
                       icon: Icon(Icons.auto_stories_outlined),
-                      label: Text('Share an experience'),
+                      label: Text('Share a spotlight'),
                     ),
                     ButtonSegment(
                       value: PostType.question,
@@ -338,17 +362,9 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                     ),
                 ],
               ),
-              if (_draft.topic != null &&
-                  FeedRules.topicReviewNoteFor(_account, _draft.topic!) != null)
-                ...[
-                const SizedBox(height: 6),
-                Text(FeedRules.topicReviewNoteFor(_account, _draft.topic!)!,
-                    style: textTheme.bodySmall),
-              ],
-              if (_draft.topic == Topic.injury ||
-                  _draft.topic == Topic.nutrition) ...[
+              if (isQuestion) ...[
                 const SizedBox(height: 12),
-                AdviceBanner(topic: _draft.topic!, compact: true),
+                const AdviceBanner(compact: true),
               ],
               const SizedBox(height: 20),
               TextField(
@@ -360,13 +376,13 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                   labelText: _hasMedia
                       ? 'Caption'
                       : isQuestion
-                          ? 'Your question'
-                          : 'Your experience',
+                      ? 'Your question'
+                      : 'Your spotlight',
                   hintText: isQuestion
                       ? 'What would you like advice on?'
                       : _hasMedia
-                          ? 'Say something about it'
-                          : 'What happened, and what did you learn?',
+                      ? 'Say something about it'
+                      : 'What happened, and what did you learn?',
                   alignLabelWithHint: true,
                   border: const OutlineInputBorder(),
                 ),
@@ -464,9 +480,11 @@ class _ComposePostScreenState extends State<ComposePostScreen> {
                       _newJourney();
                       return;
                     }
-                    setState(() => _draft.journey = v == null || v.isEmpty
-                        ? null
-                        : _journeys.firstWhere((j) => j.id == v));
+                    setState(
+                      () => _draft.journey = v == null || v.isEmpty
+                          ? null
+                          : _journeys.firstWhere((j) => j.id == v),
+                    );
                   },
                 ),
               ],
@@ -529,9 +547,11 @@ class _MediaPicker extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: canAddPhotos ? onAddPhotos : null,
               icon: const Icon(Icons.photo_library_outlined),
-              label: Text(photos.isEmpty
-                  ? 'Add photos'
-                  : 'Photos ${photos.length}/$maxPhotosPerPost'),
+              label: Text(
+                photos.isEmpty
+                    ? 'Add photos'
+                    : 'Photos ${photos.length}/$maxPhotosPerPost',
+              ),
             ),
             const SizedBox(width: 8),
             OutlinedButton.icon(

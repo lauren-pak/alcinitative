@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:athlete_app/models/account.dart';
-import 'package:athlete_app/models/moderation.dart';
 import 'package:athlete_app/models/post.dart';
 import 'package:athlete_app/models/sign_up_data.dart';
 import 'package:athlete_app/screens/feed/compose_post_screen.dart';
-import 'package:athlete_app/screens/feed/feed_screen.dart';
+import 'package:athlete_app/screens/feed/huddle_screen.dart';
 import 'package:athlete_app/screens/feed/post_detail_screen.dart';
 import 'package:athlete_app/screens/home_shell.dart';
 import 'package:athlete_app/screens/your_data_screen.dart';
@@ -30,13 +29,15 @@ Account _account(
     ..method = SignUpMethod.email
     ..name = name
     ..dateOfBirth = DateTime(now.year - age, 1, 1)
-    ..topics.addAll({Topic.training, Topic.injury});
+    ..topics.addAll({Topic.training, Topic.mindset});
   if (role == UserRole.athlete) {
     profile
       ..sport = 'Swimming'
       ..level = CompetitionLevel.club;
   }
   return Account(
+    // Test athletes are verified unless a test says otherwise.
+    verified: role == UserRole.athlete,
     uid: uid,
     athleteId: 'AA-$uid',
     profile: profile,
@@ -88,6 +89,8 @@ void main() {
     Services.safety = safety;
     Services.moderation = FakeModerationRepository(feed, safety);
     Services.media = FakeMediaRepository();
+    Services.events = InMemoryEventsRepository();
+    Services.verification = FakeVerificationRepository(profiles);
   });
 
   group('FeedRules', () {
@@ -98,22 +101,23 @@ void main() {
       expect(FeedRules.postTypesFor(_account('a')), PostType.values);
     });
 
-    test('under-18 Sports nutrition posts wait for a moderator', () async {
-      final teen = _account('t', age: 15);
-      expect(FeedRules.topicReviewNoteFor(teen, Topic.nutrition), isNotNull);
-      expect(FeedRules.topicReviewNoteFor(teen, Topic.training), isNull);
+    test('old topics are read as the new categories', () {
+      expect(Topic.fromStored('injury'), Topic.training);
+      expect(Topic.fromStored('nutrition'), Topic.training);
+      expect(Topic.fromStored('competition'), Topic.gameDay);
+      expect(Topic.fromStored('mindset'), Topic.mindset);
+      expect(Topic.fromStored('nonsense'), isNull);
       expect(
-        FeedRules.topicReviewNoteFor(_account('a'), Topic.nutrition),
-        isNull,
+        Topic.training.storedNames,
+        unorderedEquals(['training', 'injury', 'nutrition']),
       );
+    });
 
-      final held = await _post(teen, topic: Topic.nutrition);
-      expect(held.isHeld, isTrue);
-      expect(held.holdReason, HoldReason.minorNutrition);
-      expect(
-        (await _post(_account('a'), topic: Topic.nutrition)).isHeld,
-        isFalse,
-      );
+    test('only questions carry the advice banner', () async {
+      final spotlight = await _post(_account('a'));
+      final question = await _post(_account('a'), type: PostType.question);
+      expect(spotlight.needsAdviceBanner, isFalse);
+      expect(question.needsAdviceBanner, isTrue);
     });
 
     test('reply permissions follow the poster and the under-18 rule', () async {
@@ -149,28 +153,62 @@ void main() {
     });
   });
 
-  testWidgets('feed shows questions needing answers first', (tester) async {
+  testWidgets('Huddle splits spotlights and questions', (tester) async {
     final me = _account('me');
-    await _post(
-      _account('a', name: 'Alex Tan'),
-      type: PostType.question,
-      text: 'How do you taper before a meet?',
+    // New questions wait for a moderator; these were approved.
+    feed.publish(
+      await _post(
+        _account('a', name: 'Alex Tan'),
+        type: PostType.question,
+        text: 'How do you taper before a meet?',
+      ),
+    );
+    feed.publish(
+      await _post(
+        _account('a', name: 'Alex Tan'),
+        type: PostType.question,
+        text: 'Favourite warm-up song?',
+      ),
     );
     await _post(_account('b', name: 'Bea Lim'));
 
-    await _pump(tester, FeedScreen(account: me));
+    await _pump(tester, HuddleScreen(account: me, onCompose: (_) {}));
+    // Spotlight first: only the spotlight.
+    expect(find.text('Bea Lim'), findsOneWidget);
+    expect(find.text('How do you taper before a meet?'), findsNothing);
+    expect(find.text('Share a spotlight'), findsOneWidget);
 
+    await tester.tap(find.text('Ask an athlete'));
+    await tester.pumpAndSettle();
     expect(find.text('Needs an answer'), findsOneWidget);
     expect(find.text('How do you taper before a meet?'), findsOneWidget);
-    expect(find.text('Bea Lim'), findsOneWidget);
-    final needsY = tester.getTopLeft(find.text('Needs an answer')).dy;
-    final latestY = tester.getTopLeft(find.text('Latest')).dy;
-    expect(needsY, lessThan(latestY));
+    expect(find.text('Bea Lim'), findsNothing);
+    expect(find.text('Ask a question'), findsOneWidget);
+  });
+
+  testWidgets('category chips narrow Huddle', (tester) async {
+    await _post(_account('a'), text: 'Hill sprints!');
+    await _post(_account('a'), topic: Topic.gameDay, text: 'My medal day.');
+    await _pump(
+      tester,
+      HuddleScreen(account: _account('me'), onCompose: (_) {}),
+    );
+    expect(find.text('Hill sprints!'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, '🏆 Game day'));
+    await tester.pumpAndSettle();
+    expect(find.text('Hill sprints!'), findsNothing);
+    expect(find.text('My medal day.'), findsOneWidget);
   });
 
   testWidgets('pull to refresh shows new posts', (tester) async {
-    await _pump(tester, FeedScreen(account: _account('me')));
-    expect(find.text('No posts yet. Be the first to share.'), findsOneWidget);
+    await _pump(
+      tester,
+      HuddleScreen(account: _account('me'), onCompose: (_) {}),
+    );
+    expect(
+      find.text('No spotlights yet. Be the first to share.'),
+      findsOneWidget,
+    );
 
     await _post(_account('a'), text: 'Fresh post after the feed loaded.');
     await tester.fling(find.byType(ListView).first, const Offset(0, 900), 1000);
@@ -186,37 +224,38 @@ void main() {
       anonymous: true,
     );
 
-    await _pump(tester, FeedScreen(account: _account('me')));
+    await _pump(
+      tester,
+      HuddleScreen(account: _account('me'), onCompose: (_) {}),
+    );
 
     expect(find.text('Anonymous athlete'), findsOneWidget);
     expect(find.text('Alex Tan'), findsNothing);
     expect(find.text('Swimming · Club'), findsNothing);
   });
 
-  testWidgets('injury posts show the not-medical-advice banner', (
+  testWidgets('questions show the not-professional-advice banner', (
     tester,
   ) async {
-    await _post(
+    final post = await _post(
       _account('a'),
-      topic: Topic.injury,
-      text: 'Shin splints: what helped me recover.',
+      type: PostType.question,
+      text: 'How do you calm nerves before a final?',
     );
-
-    await _pump(tester, FeedScreen(account: _account('me')));
-
-    expect(
-      find.textContaining('Shared experience, not medical advice'),
-      findsOneWidget,
-    );
+    await _pump(tester, PostDetailScreen(post: post, viewer: _account('me')));
+    expect(find.textContaining("It isn't professional advice"), findsOneWidget);
   });
 
   testWidgets('composing a post adds it to the feed', (tester) async {
     final me = _account('me');
     await _pump(tester, HomeShell(account: me, isNewAccount: false));
 
-    // "New post" lives in the bottom navigation bar and opens the camera.
-    // Tests have no camera, so switch to a text post.
-    await tester.tap(find.text('New post'));
+    // Events is the home tab; spotlights are shared from Huddle, starting
+    // at the camera. Tests have no camera, so switch to a text post.
+    expect(find.text('Events'), findsWidgets);
+    await tester.tap(find.text('Huddle'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Share a spotlight'));
     await tester.pumpAndSettle();
     expect(find.text('No camera found on this device.'), findsOneWidget);
     await tester.tap(find.text('Text'));
@@ -229,7 +268,7 @@ void main() {
     await tester.pump();
     expect(find.text('Choose a topic'), findsWidgets);
 
-    await tester.tap(find.text('Training'));
+    await tester.tap(find.text('Training wins'));
     await tester.enterText(
       find.byType(TextField).first,
       'Doubled my stretching and my shoulder feels better.',
@@ -244,27 +283,13 @@ void main() {
     expect(feed.posts.single.author?.name, 'Sam Taylor');
   });
 
-  testWidgets('public members can only ask, under-18 nutrition is reviewed', (
-    tester,
-  ) async {
+  testWidgets('public members can only ask', (tester) async {
     await _pump(
       tester,
       ComposePostScreen(account: _account('p', role: UserRole.public)),
     );
-    expect(find.text('Share an experience'), findsNothing);
+    expect(find.text('Share a spotlight'), findsNothing);
     expect(find.textContaining('Question from the public'), findsOneWidget);
-
-    await _pump(tester, ComposePostScreen(account: _account('t', age: 15)));
-    final nutrition = tester.widget<ChoiceChip>(
-      find.widgetWithText(ChoiceChip, 'Sports nutrition'),
-    );
-    expect(nutrition.onSelected, isNotNull);
-    await tester.tap(find.text('Sports nutrition'));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Sports nutrition posts from under-18s'),
-      findsOneWidget,
-    );
   });
 
   testWidgets('replies, Helpful and "This helped me" answer a question', (

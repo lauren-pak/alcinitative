@@ -41,8 +41,10 @@ Future<PreparedVideo> prepareVideo(String path) async {
   if (defaultTargetPlatform != TargetPlatform.iOS) {
     throw UnsupportedError("Videos can't be added on this device yet.");
   }
-  final result = await _videoChannel
-      .invokeMapMethod<String, Object?>('prepare', {'path': path});
+  final result = await _videoChannel.invokeMapMethod<String, Object?>(
+    'prepare',
+    {'path': path},
+  );
   if (result == null) throw StateError('Video preparation returned nothing');
   return PreparedVideo(
     path: result['path']! as String,

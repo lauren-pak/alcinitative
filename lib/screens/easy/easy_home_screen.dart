@@ -5,15 +5,27 @@ import '../../models/post.dart';
 import '../../models/sign_up_data.dart';
 import '../../services/services.dart';
 import '../../widgets/feed_widgets.dart';
+import '../feed/prompt_widgets.dart';
 import 'easy_post_screen.dart';
 import 'easy_widgets.dart';
 
-/// Easy mode home: four big topic pictures, then new posts in the member's
-/// topics.
+/// Easy mode Huddle: a big "Share" button, four big category pictures,
+/// then new posts in the member's categories.
 class EasyHomeScreen extends StatefulWidget {
-  const EasyHomeScreen({super.key, required this.account});
+  const EasyHomeScreen({
+    super.key,
+    required this.account,
+    required this.onCompose,
+    this.onAnswerPrompt,
+  });
 
   final Account account;
+
+  /// Starts the step-by-step posting guide.
+  final VoidCallback onCompose;
+
+  /// Answering this week's Huddle question.
+  final void Function(WeeklyPrompt prompt)? onAnswerPrompt;
 
   @override
   State<EasyHomeScreen> createState() => _EasyHomeScreenState();
@@ -61,7 +73,7 @@ class _EasyHomeScreenState extends State<EasyHomeScreen> {
     final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Home'),
+        title: const Text('Huddle'),
         actions: const [EasyHelpButton()],
       ),
       body: RefreshIndicator(
@@ -70,7 +82,25 @@ class _EasyHomeScreenState extends State<EasyHomeScreen> {
           padding: const EdgeInsets.only(bottom: 24),
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: widget.onCompose,
+                  icon: const Icon(Icons.videocam_outlined),
+                  label: const Text('Share or ask'),
+                ),
+              ),
+            ),
+            WeeklyPromptBanner(
+              account: widget.account,
+              easy: true,
+              onAnswer: FeedRules.spotlightBlockedFor(widget.account) == null
+                  ? widget.onAnswerPrompt
+                  : null,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Text(
                 'What do you want to see?',
                 style: textTheme.titleLarge,

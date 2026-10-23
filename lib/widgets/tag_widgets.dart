@@ -73,9 +73,8 @@ class _TagEditorState extends State<TagEditor> {
               for (final tag in widget.tags)
                 InputChip(
                   label: Text('#$tag'),
-                  onDeleted: () => widget.onChanged(
-                    [...widget.tags]..remove(tag),
-                  ),
+                  onDeleted: () =>
+                      widget.onChanged([...widget.tags]..remove(tag)),
                   deleteButtonTooltipMessage: 'Remove #$tag',
                 ),
             ],
@@ -96,10 +95,9 @@ class TagChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final style = Theme.of(context)
-        .textTheme
-        .labelMedium
-        ?.copyWith(color: scheme.primary);
+    final style = Theme.of(
+      context,
+    ).textTheme.labelMedium?.copyWith(color: scheme.primary);
     return Wrap(
       spacing: 4,
       runSpacing: 4,

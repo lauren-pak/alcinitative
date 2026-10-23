@@ -17,8 +17,8 @@ import 'media_repository.dart';
 /// the owner's `contributions`, so deleting the account deletes the media.
 class FirebaseMediaRepository implements MediaRepository {
   FirebaseMediaRepository({FirebaseFirestore? db, FirebaseStorage? storage})
-      : _db = db ?? FirebaseFirestore.instance,
-        _storage = storage ?? FirebaseStorage.instance;
+    : _db = db ?? FirebaseFirestore.instance,
+      _storage = storage ?? FirebaseStorage.instance;
 
   final FirebaseFirestore _db;
   final FirebaseStorage _storage;
@@ -27,10 +27,16 @@ class FirebaseMediaRepository implements MediaRepository {
   static const _maxImageBytes = 5 * 1024 * 1024;
 
   /// Records ownership and returns the new media ID.
-  Future<String> _claim(Account owner, MediaKind kind, List<String> files) async {
+  Future<String> _claim(
+    Account owner,
+    MediaKind kind,
+    List<String> files,
+  ) async {
     final ownerDoc = _db.collection('mediaOwners').doc();
-    final contributions =
-        _db.collection('users').doc(owner.uid).collection('contributions');
+    final contributions = _db
+        .collection('users')
+        .doc(owner.uid)
+        .collection('contributions');
     final batch = _db.batch()
       ..set(ownerDoc, {'uid': owner.uid, 'kind': kind.name})
       ..set(contributions.doc(), {'path': ownerDoc.path});
@@ -63,11 +69,10 @@ class FirebaseMediaRepository implements MediaRepository {
 
   @override
   Future<MediaItem> uploadVideo(Account owner, PreparedVideo video) async {
-    final id = await _claim(
-      owner,
-      MediaKind.video,
-      ['media/{id}.mp4', 'media/{id}_thumb.jpg'],
-    );
+    final id = await _claim(owner, MediaKind.video, [
+      'media/{id}.mp4',
+      'media/{id}_thumb.jpg',
+    ]);
     final item = MediaItem(
       id: id,
       kind: MediaKind.video,
@@ -75,28 +80,31 @@ class FirebaseMediaRepository implements MediaRepository {
       height: video.height,
       durationMs: video.durationMs,
     );
-    await _storage.ref(item.previewPath).putFile(
+    await _storage
+        .ref(item.previewPath)
+        .putFile(
           File(video.thumbnailPath),
           SettableMetadata(contentType: 'image/jpeg'),
         );
-    await _storage.ref(item.path).putFile(
-          File(video.path),
-          SettableMetadata(contentType: 'video/mp4'),
-        );
+    await _storage
+        .ref(item.path)
+        .putFile(File(video.path), SettableMetadata(contentType: 'video/mp4'));
     return item;
   }
 
   @override
   Future<Uint8List> imageBytes(String path) {
-    return _imageCache.putIfAbsent(path, () async {
-      final data = await _storage.ref(path).getData(_maxImageBytes);
-      if (data == null) throw StateError('Image not found: $path');
-      return data;
-    }).catchError((Object e) {
-      // Don't cache failures, so the next view retries.
-      _imageCache.remove(path);
-      throw e;
-    });
+    return _imageCache
+        .putIfAbsent(path, () async {
+          final data = await _storage.ref(path).getData(_maxImageBytes);
+          if (data == null) throw StateError('Image not found: $path');
+          return data;
+        })
+        .catchError((Object e) {
+          // Don't cache failures, so the next view retries.
+          _imageCache.remove(path);
+          throw e;
+        });
   }
 
   @override

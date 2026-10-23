@@ -43,10 +43,14 @@ class CaptureScreen extends StatefulWidget {
     required this.account,
     this.respondingTo,
     this.returnMedia = false,
+    this.prompt,
   });
 
   final Account account;
   final Post? respondingTo;
+
+  /// Answering this week's Huddle question.
+  final WeeklyPrompt? prompt;
   final bool returnMedia;
 
   @override
@@ -104,14 +108,14 @@ class _CaptureScreenState extends State<CaptureScreen>
     try {
       // Never leave people stuck on a spinner if the camera doesn't answer.
       if (_cameras.isEmpty) {
-        _cameras =
-            await availableCameras().timeout(const Duration(seconds: 5));
+        _cameras = await availableCameras().timeout(const Duration(seconds: 5));
       }
       if (_cameras.isEmpty) {
         setState(() => _cameraProblem = 'No camera found on this device.');
         return;
       }
-      final description = use ??
+      final description =
+          use ??
           _cameras.firstWhere(
             (c) => c.lensDirection == CameraLensDirection.front,
             orElse: () => _cameras.first,
@@ -133,10 +137,12 @@ class _CaptureScreenState extends State<CaptureScreen>
       });
     } on CameraException catch (e) {
       if (!mounted) return;
-      setState(() => _cameraProblem = e.code.contains('AccessDenied')
-          ? 'Camera access is off. Turn it on in Settings, or use your '
-              'library.'
-          : "The camera couldn't start.");
+      setState(
+        () => _cameraProblem = e.code.contains('AccessDenied')
+            ? 'Camera access is off. Turn it on in Settings, or use your '
+                  'library.'
+            : "The camera couldn't start.",
+      );
     } catch (_) {
       // e.g. no camera plugin (simulator, tests).
       if (mounted) {
@@ -263,6 +269,7 @@ class _CaptureScreenState extends State<CaptureScreen>
             : ComposePostScreen(
                 account: widget.account,
                 respondingTo: widget.respondingTo,
+                prompt: widget.prompt,
                 initialVideo: video,
                 initialPhotos: photos,
               ),
@@ -314,8 +321,8 @@ class _CaptureScreenState extends State<CaptureScreen>
                   child: _mode == CaptureMode.text
                       ? _textPanel()
                       : camera != null && camera.value.isInitialized
-                          ? _preview(camera)
-                          : _noCameraPanel(),
+                      ? _preview(camera)
+                      : _noCameraPanel(),
                 ),
               ),
             ),
@@ -361,7 +368,8 @@ class _CaptureScreenState extends State<CaptureScreen>
     );
   }
 
-  static String _clock(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  static String _clock(int s) =>
+      '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
 
   Widget _preview(CameraController camera) {
     return FittedBox(
@@ -385,8 +393,11 @@ class _CaptureScreenState extends State<CaptureScreen>
               : Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.no_photography_outlined,
-                        color: Colors.white70, size: 48),
+                    const Icon(
+                      Icons.no_photography_outlined,
+                      color: Colors.white70,
+                      size: 48,
+                    ),
                     const SizedBox(height: 12),
                     Text(
                       _cameraProblem!,
@@ -414,8 +425,10 @@ class _CaptureScreenState extends State<CaptureScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Aa',
-                style: TextStyle(color: Colors.white, fontSize: 64)),
+            const Text(
+              'Aa',
+              style: TextStyle(color: Colors.white, fontSize: 64),
+            ),
             const SizedBox(height: 8),
             const Text(
               'Share an experience or ask a question in words.',
@@ -426,7 +439,9 @@ class _CaptureScreenState extends State<CaptureScreen>
             FilledButton.icon(
               onPressed: () => _compose(),
               icon: const Icon(Icons.edit),
-              label: Text(widget.returnMedia ? 'Just use words' : 'Write a post'),
+              label: Text(
+                widget.returnMedia ? 'Just use words' : 'Write a post',
+              ),
             ),
           ],
         ),
@@ -475,8 +490,8 @@ class _CaptureScreenState extends State<CaptureScreen>
                     color: !cameraReady
                         ? Colors.white24
                         : isVideo
-                            ? Colors.red
-                            : Colors.white,
+                        ? Colors.red
+                        : Colors.white,
                     borderRadius: BorderRadius.circular(_recording ? 6 : 40),
                   ),
                 ),
@@ -487,7 +502,8 @@ class _CaptureScreenState extends State<CaptureScreen>
             width: 88,
             child: _busy
                 ? const Center(
-                    child: CircularProgressIndicator(color: Colors.white))
+                    child: CircularProgressIndicator(color: Colors.white),
+                  )
                 : null,
           ),
         ],
@@ -502,9 +518,11 @@ class _CaptureScreenState extends State<CaptureScreen>
         if (note != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(note,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            child: Text(
+              note,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
           ),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,

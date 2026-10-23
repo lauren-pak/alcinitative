@@ -17,8 +17,9 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   final _user = Services.auth.currentUser;
-  late final Future<Account?>? _account =
-      _user == null ? null : Services.profiles.load(_user.uid);
+  late final Future<Account?>? _account = _user == null
+      ? null
+      : Services.profiles.load(_user.uid);
 
   @override
   Widget build(BuildContext context) {
